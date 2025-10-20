@@ -12,12 +12,16 @@
     "deploy": "next build --no-lint && touch out/.nojekyll && node ./ghp-postbuild && git add -f out && git commit -m \"Deploy gh-pages\" && cd .. && git subtree push --prefix ui/out origin gh-pages"
   },
   "dependencies": {
+    "@peculiar/webcrypto": "^1.5.0",
+    "@simplewebauthn/browser": "^13.2.2",
     "coi-serviceworker": "^0.1.7",
     "comlink": "^4.4.2",
     "next": "14.2.12",
+    "o1js": "^2.*",
     "react": "^18",
     "react-dom": "^18",
-    "o1js": "^2.*"
+    "xml-js": "^1.6.11",
+    "xmldsigjs": "^2.8.2"
   },
   "devDependencies": {
     "@types/node": "^20",
