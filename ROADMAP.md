@@ -1,0 +1,399 @@
+# MinaID Development Roadmap
+
+## 📋 Project Status Overview
+
+**Current Phase**: Phase 1 Complete ✅ → Moving to Phase 2
+
+**Last Updated**: October 20, 2025
+
+---
+
+## ✅ Phase 1: Smart Contracts (COMPLETE)
+
+### Completed Tasks
+
+- [x] **DIDRegistry Contract** - Full implementation
+  - [x] Register DID with Merkle tree storage
+  - [x] Revoke DID functionality
+  - [x] Update DID document hash
+  - [x] Verify DID status
+  - [x] Ownership management
+  - [x] Event emissions for indexing
+  - [x] Total DID counter
+
+- [x] **ZKPVerifier Contract** - Full implementation
+  - [x] Age proof verification
+  - [x] KYC proof verification
+  - [x] Generic credential proof verification
+  - [x] Batch verification (up to 5 credentials)
+  - [x] Trusted issuer management
+  - [x] Minimum age configuration
+  - [x] Verification counter
+
+- [x] **AgeVerificationProgram** - ZkProgram implementation
+  - [x] Prove age above minimum (without revealing exact age)
+  - [x] Prove age in range [min, max]
+  - [x] Recursive proof composition
+  - [x] Age hash commitment scheme
+  - [x] Issuer verification
+
+- [x] **Contract Build System**
+  - [x] TypeScript compilation configuration
+  - [x] o1js integration
+  - [x] Export all contracts in index.ts
+  - [x] Successful build verification
+
+### Contract Capabilities Summary
+
+| Contract | Methods | State Variables | Events | Status |
+|----------|---------|-----------------|--------|--------|
+| DIDRegistry | 6 | 3 | 5 | ✅ Complete |
+| ZKPVerifier | 8 | 4 | 6 | ✅ Complete |
+| AgeVerificationProgram | 3 | N/A | N/A | ✅ Complete |
+
+---
+
+## 🚧 Phase 2: Frontend UI (IN PROGRESS)
+
+### Next Immediate Tasks
+
+#### 2.1 React Context Setup
+
+- [ ] **Create `WalletContext.tsx`**
+  ```typescript
+  // State to manage:
+  - userAddress: string | null
+  - publicKey: PublicKey | null
+  - privateKey: PrivateKey | null
+  - did: string | null
+  - credentials: VerifiableCredential[]
+  - isConnected: boolean
+  - network: 'devnet' | 'mainnet'
+  
+  // Functions to implement:
+  - connectWallet(): Connect to Auro Wallet
+  - generateDID(): Generate new keypair
+  - storeDID(): Save to local storage
+  - loadDID(): Load from local storage
+  - addCredential(): Add VC to state
+  - clearSession(): Logout
+  ```
+
+- [ ] **Create `DIDContext.tsx`**
+  ```typescript
+  // Manages DID operations:
+  - registerDID(didDocument): Register on-chain
+  - revokeDID(): Revoke DID
+  - updateDID(newDocument): Update DID
+  - verifyDID(publicKey): Check registration status
+  - getDIDDocument(): Fetch from IPFS/off-chain storage
+  ```
+
+#### 2.2 Core Components
+
+- [ ] **Signup.tsx Component**
+  - [ ] UI: File upload for Aadhar XML
+  - [ ] UI: "Generate MinaID" button
+  - [ ] UI: Progress indicator for ZK proof generation
+  - [ ] Logic: Parse Aadhar XML
+  - [ ] Logic: Verify UIDAI signature
+  - [ ] Logic: Extract date of birth and calculate age
+  - [ ] Logic: Generate age ZK proof using AgeVerificationProgram
+  - [ ] Logic: Call issuer service `/issue-credential`
+  - [ ] Logic: Store credential in WalletContext
+  - [ ] Logic: Register DID on DIDRegistry contract
+  - [ ] UI: Success/error feedback
+
+- [ ] **Login.tsx Component**
+  - [ ] UI: "Login with MinaID" button
+  - [ ] UI: Loading state during authentication
+  - [ ] Logic: Fetch challenge nonce from verifier service
+  - [ ] Logic: Sign challenge with private key
+  - [ ] Logic: Generate ZK proof of credential possession
+  - [ ] Logic: Submit to `/login` endpoint
+  - [ ] Logic: Store JWT token
+  - [ ] Logic: Redirect to dashboard
+
+- [ ] **Dashboard.tsx Component**
+  - [ ] UI: Display user DID
+  - [ ] UI: Show list of credentials
+  - [ ] UI: Credential status (active/expired/revoked)
+  - [ ] UI: Generate new proofs for credentials
+  - [ ] UI: Revoke DID button
+  - [ ] UI: Update DID document
+  - [ ] Logic: Fetch DID status from contract
+  - [ ] Logic: Check credential expiry
+  - [ ] Logic: Generate shareable ZK proofs
+
+- [ ] **WalletConnect.tsx Component**
+  - [ ] UI: Connect button
+  - [ ] UI: Display connected address
+  - [ ] UI: Network selector (devnet/mainnet)
+  - [ ] UI: Disconnect button
+  - [ ] Logic: Detect Auro Wallet
+  - [ ] Logic: Handle connection
+  - [ ] Logic: Switch networks
+  - [ ] Error handling for no wallet
+
+#### 2.3 Utility Functions
+
+- [ ] **AadharParser.ts**
+  ```typescript
+  - parseAadharXML(file): Extract data from XML
+  - verifyUIDAISignature(xmlData): Verify authenticity
+  - extractAttributes(xmlData): Get name, DOB, etc.
+  - calculateAge(dob): Compute age from date of birth
+  ```
+
+- [ ] **ProofGenerator.ts**
+  ```typescript
+  - generateAgeProof(age, minAge, salt): Create age ZK proof
+  - generateKYCProof(kycData, salt): Create KYC ZK proof
+  - generateCredentialProof(credential): Generic proof
+  - verifyProofLocally(proof): Client-side verification
+  ```
+
+- [ ] **ContractInterface.ts**
+  ```typescript
+  - initContracts(): Load contract instances
+  - registerDID(params): Call DIDRegistry.registerDID
+  - verifyAge(params): Call ZKPVerifier.verifyAgeProof
+  - verifyKYC(params): Call ZKPVerifier.verifyKYCProof
+  - getDIDStatus(publicKey): Query DID registry
+  ```
+
+#### 2.4 Styling & UX
+
+- [ ] Design system setup (Tailwind CSS already configured)
+- [ ] Create reusable UI components:
+  - [ ] Button variants
+  - [ ] Input fields
+  - [ ] Cards
+  - [ ] Loading spinners
+  - [ ] Toast notifications
+- [ ] Responsive design for mobile
+- [ ] Dark mode support
+- [ ] Accessibility (ARIA labels, keyboard navigation)
+
+### Phase 2 Timeline
+
+**Estimated Duration**: 2-3 weeks
+
+- Week 1: Context + Core Components (Signup, Login)
+- Week 2: Dashboard + Utilities
+- Week 3: Styling, UX refinements, testing
+
+---
+
+## 📅 Phase 3: Backend Services (PLANNED)
+
+### 3.1 Issuer Service (Node.js + Express)
+
+- [ ] **Setup Express Server**
+  - [ ] Configure CORS
+  - [ ] Add rate limiting
+  - [ ] Setup logging (Winston)
+  - [ ] Error handling middleware
+
+- [ ] **POST /issue-credential Endpoint**
+  - [ ] Receive user DID and ZK proof
+  - [ ] Verify ZK proof against blockchain
+  - [ ] Create W3C Verifiable Credential
+  - [ ] Sign credential with issuer key
+  - [ ] Store credential metadata (optional)
+  - [ ] Return signed VC to client
+
+- [ ] **Credential Management**
+  - [ ] Database schema for issued credentials
+  - [ ] Revocation list management
+  - [ ] Credential expiry handling
+  - [ ] Batch issuance support
+
+- [ ] **Security**
+  - [ ] Secure key storage (HSM or KMS)
+  - [ ] Input validation
+  - [ ] SQL injection prevention
+  - [ ] XSS protection
+
+### 3.2 Verifier Service (Node.js + Express)
+
+- [ ] **Setup Express Server**
+  - [ ] Similar security config as Issuer
+
+- [ ] **GET /get-challenge Endpoint**
+  - [ ] Generate secure random nonce
+  - [ ] Store nonce with expiry (Redis)
+  - [ ] Return nonce to client
+
+- [ ] **POST /login Endpoint**
+  - [ ] Verify signature of challenge
+  - [ ] Verify ZK proof on-chain
+  - [ ] Check nonce hasn't been used (prevent replay)
+  - [ ] Generate JWT session token
+  - [ ] Return token with expiry
+
+- [ ] **POST /verify-credential Endpoint**
+  - [ ] Receive credential and proof
+  - [ ] Verify on ZKPVerifier contract
+  - [ ] Return verification result
+
+- [ ] **Session Management**
+  - [ ] JWT token generation
+  - [ ] Token refresh mechanism
+  - [ ] Logout/revoke tokens
+  - [ ] Session storage (Redis)
+
+### Phase 3 Timeline
+
+**Estimated Duration**: 2 weeks
+
+- Week 1: Issuer Service
+- Week 2: Verifier Service
+
+---
+
+## 📅 Phase 4: Integration & Testing (PLANNED)
+
+### 4.1 Integration
+
+- [ ] Connect frontend to backend services
+- [ ] Connect backend to deployed contracts
+- [ ] Implement off-chain storage (IPFS for DID documents)
+- [ ] Add analytics and monitoring
+- [ ] Setup error tracking (Sentry)
+
+### 4.2 Testing
+
+- [ ] **Unit Tests**
+  - [ ] Contract unit tests (Jest)
+  - [ ] Frontend component tests (React Testing Library)
+  - [ ] Backend endpoint tests (Supertest)
+
+- [ ] **Integration Tests**
+  - [ ] Full signup flow
+  - [ ] Full login flow
+  - [ ] Credential issuance and verification
+  - [ ] DID operations (register, update, revoke)
+
+- [ ] **E2E Tests**
+  - [ ] Cypress or Playwright tests
+  - [ ] User journey scenarios
+  - [ ] Edge cases and error handling
+
+- [ ] **Security Testing**
+  - [ ] Penetration testing
+  - [ ] Smart contract audit
+  - [ ] ZK proof verification audit
+
+### Phase 4 Timeline
+
+**Estimated Duration**: 2-3 weeks
+
+---
+
+## 📅 Phase 5: Deployment & Launch (PLANNED)
+
+### 5.1 Testnet Deployment
+
+- [ ] Deploy contracts to Berkeley testnet
+- [ ] Deploy frontend to Vercel/Netlify
+- [ ] Deploy backend to AWS/GCP/Azure
+- [ ] Setup CI/CD pipelines
+- [ ] Configure monitoring (Datadog, New Relic)
+
+### 5.2 Documentation
+
+- [ ] Complete API documentation (Swagger/OpenAPI)
+- [ ] User guide
+- [ ] Developer documentation
+- [ ] Video tutorials
+- [ ] Blog posts
+
+### 5.3 Community & Marketing
+
+- [ ] Create landing page
+- [ ] Social media presence
+- [ ] Developer Discord/Telegram
+- [ ] Hackathon participation
+- [ ] Partnerships with identity providers
+
+### 5.4 Mainnet Preparation
+
+- [ ] Security audit results implemented
+- [ ] Bug bounty program
+- [ ] Stress testing
+- [ ] User acceptance testing
+- [ ] Legal compliance review
+
+### 5.5 Mainnet Launch
+
+- [ ] Deploy contracts to Mina mainnet
+- [ ] Update frontend configuration
+- [ ] Migrate backend to production infrastructure
+- [ ] Public announcement
+- [ ] Monitor metrics
+
+### Phase 5 Timeline
+
+**Estimated Duration**: 4-6 weeks
+
+---
+
+## 📊 Current Progress
+
+```
+Phase 1: Smart Contracts         ████████████████████ 100%
+Phase 2: Frontend UI              ████░░░░░░░░░░░░░░░░  20%
+Phase 3: Backend Services         ░░░░░░░░░░░░░░░░░░░░   0%
+Phase 4: Integration & Testing    ░░░░░░░░░░░░░░░░░░░░   0%
+Phase 5: Deployment & Launch      ░░░░░░░░░░░░░░░░░░░░   0%
+
+Overall Project Progress:         ████░░░░░░░░░░░░░░░░  24%
+```
+
+---
+
+## 🎯 Immediate Next Steps (This Week)
+
+1. **Create WalletContext.tsx** - Foundation for all wallet operations
+2. **Create Signup.tsx** - First user interaction component
+3. **Implement AadharParser.ts** - Core novelty feature
+4. **Test signup flow** - End-to-end manual testing
+
+---
+
+## 📝 Notes
+
+### Technical Decisions Made
+- ✅ Using Mina Protocol for blockchain layer
+- ✅ Using o1js for smart contracts and ZK proofs
+- ✅ Using Next.js for frontend (SSR + React)
+- ✅ Using Tailwind CSS for styling
+- ✅ Using Node.js/Express for backend services
+- ✅ Using W3C Verifiable Credentials standard
+
+### Technical Decisions Pending
+- [ ] Database choice (PostgreSQL vs MongoDB)
+- [ ] Off-chain storage (IPFS vs Arweave vs Centralized)
+- [ ] Session storage (Redis vs In-memory)
+- [ ] Deployment platform (AWS vs GCP vs Azure)
+- [ ] CDN choice (Cloudflare vs AWS CloudFront)
+
+### Known Challenges
+1. Aadhar XML signature verification (need UIDAI public keys)
+2. Large ZK proof generation time (need caching strategy)
+3. Mobile responsiveness for file upload
+4. Gas optimization for batch operations
+
+### Resources Needed
+- [ ] UIDAI Aadhar XML format specification
+- [ ] UIDAI public key for signature verification
+- [ ] Sample Aadhar XML files for testing
+- [ ] Security audit firm contact
+- [ ] Legal counsel for compliance
+
+---
+
+**Repository**: https://github.com/SuryaSundarVadali/MinaID  
+**Branch**: main  
+**Latest Commit**: Contracts Phase 1 Complete
