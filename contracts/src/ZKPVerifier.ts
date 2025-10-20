@@ -217,57 +217,60 @@ export class ZKPVerifier extends SmartContract {
   }
 
   /**
-   * Batch verify multiple credentials
+   * Batch verify multiple credentials at once
+   * More efficient than individual verifications
+   * NOTE: Commented out for MVP - o1js doesn't support array parameters
+   * TODO: Implement using recursive proof composition in future
    * 
-   * @param claims - Array of up to 5 credential claims
-   * @param proofs - Array of corresponding proofs
+   * @param claims - Array of credential claims
+   * @param proofs - Array of proofs
    * @param commitments - Array of commitment hashes
    */
-  @method
-  async batchVerifyCredentials(
-    claims: CredentialClaim[],
-    proofs: Field[],
-    commitments: Field[]
-  ) {
-    // Limit batch size to prevent excessive computation
-    const batchSize = claims.length;
-    Provable.log('Batch size:', batchSize);
+  // @method
+  // async batchVerifyCredentials(
+  //   claims: CredentialClaim[],
+  //   proofs: Field[],
+  //   commitments: Field[]
+  // ) {
+  //   // Limit batch size to prevent excessive computation
+  //   const batchSize = claims.length;
+  //   Provable.log('Batch size:', batchSize);
 
-    // Verify each credential in the batch
-    for (let i = 0; i < batchSize && i < 5; i++) {
-      const claim = claims[i];
-      const proof = proofs[i];
-      const commitment = commitments[i];
+  //   // Verify each credential in the batch
+  //   for (let i = 0; i < batchSize && i < 5; i++) {
+  //     const claim = claims[i];
+  //     const proof = proofs[i];
+  //     const commitment = commitments[i];
 
-      // Verify not expired
-      const currentBlock = this.network.blockchainLength.getAndRequireEquals();
-      const currentBlockField = Field.from(currentBlock.toBigint());
-      claim.expiresAt.assertGreaterThan(currentBlockField, 'Credential expired');
+  //     // Verify not expired
+  //     const currentBlock = this.network.blockchainLength.getAndRequireEquals();
+  //     const currentBlockField = Field.from(currentBlock.toBigint());
+  //     claim.expiresAt.assertGreaterThan(currentBlockField, 'Credential expired');
 
-      // Verify proof
-      const expectedCommitment = Poseidon.hash([
-        ...claim.issuer.toFields(),
-        ...claim.subject.toFields(),
-        claim.claimType,
-        claim.claimValue,
-        claim.issuedAt,
-        claim.expiresAt,
-      ]);
+  //     // Verify proof
+  //     const expectedCommitment = Poseidon.hash([
+  //       ...claim.issuer.toFields(),
+  //       ...claim.subject.toFields(),
+  //       claim.claimType,
+  //       claim.claimValue,
+  //       claim.issuedAt,
+  //       claim.expiresAt,
+  //     ]);
 
-      commitment.assertEquals(expectedCommitment, 'Invalid commitment');
-      proof.assertEquals(commitment, 'Invalid proof');
-    }
+  //     commitment.assertEquals(expectedCommitment, 'Invalid commitment');
+  //     proof.assertEquals(commitment, 'Invalid proof');
+  //   }
 
-    // Increment verification counter by batch size
-    const currentTotal = this.totalVerifications.getAndRequireEquals();
-    this.totalVerifications.set(currentTotal.add(Field(batchSize)));
+  //   // Increment verification counter by batch size
+  //   const currentTotal = this.totalVerifications.getAndRequireEquals();
+  //   this.totalVerifications.set(currentTotal.add(Field(batchSize)));
 
-    // Emit batch verification event
-    this.emitEvent('BatchVerified', {
-      count: Field(batchSize),
-      timestamp: this.network.blockchainLength.getAndRequireEquals(),
-    });
-  }
+  //   // Emit batch verification event
+  //   this.emitEvent('BatchVerified', {
+  //     count: Field(batchSize),
+  //     timestamp: this.network.blockchainLength.getAndRequireEquals(),
+  //   });
+  // }
 
   /**
    * Add a trusted issuer

@@ -1,5 +1,5 @@
 
-import { Field, JsonProof } from "o1js";
+import { PublicKey } from "o1js";
 import * as Comlink from "comlink";
 
 export default class ZkappWorkerClient {
@@ -15,49 +15,53 @@ export default class ZkappWorkerClient {
     this.remoteApi = Comlink.wrap(worker);
   }  
 
+  async setActiveInstanceToBerkeley() {
+    return this.remoteApi.setActiveInstanceToBerkeley();
+  }
+
   async setActiveInstanceToDevnet() {
     return this.remoteApi.setActiveInstanceToDevnet();
   }
 
-  async loadContract() {
-    return this.remoteApi.loadContract();
+  async loadContracts() {
+    return this.remoteApi.loadContracts();
   }
 
-  async compileZkProgram() {
-    return this.remoteApi.compileZkProgram();
+  async compileAgeVerificationProgram() {
+    return this.remoteApi.compileAgeVerificationProgram();
   }
 
-  async compileContract() {
-    return this.remoteApi.compileContract();
+  async compileDIDRegistry() {
+    return this.remoteApi.compileDIDRegistry();
+  }
+
+  async compileZKPVerifier() {
+    return this.remoteApi.compileZKPVerifier();
   }
 
   async fetchAccount(publicKeyBase58: string) {
     return this.remoteApi.fetchAccount(publicKeyBase58);
   }
 
-  async initZkappInstance(publicKeyBase58: string) {
-    return this.remoteApi.initZkappInstance(publicKeyBase58);
+  async initDIDRegistryInstance(publicKeyBase58: string) {
+    return this.remoteApi.initDIDRegistryInstance(publicKeyBase58);
   }
 
-  async getNum(): Promise<Field> {
-    const result = await this.remoteApi.getNum();
-    return Field.fromJSON(JSON.parse(result as string));
+  async initZKPVerifierInstance(publicKeyBase58: string) {
+    return this.remoteApi.initZKPVerifierInstance(publicKeyBase58);
   }
 
-  async initZkProgram(num: string) {
-    return this.remoteApi.initZkProgram(num);
+  async getDIDStatus(userPublicKeyBase58: string) {
+    const result = await this.remoteApi.getDIDStatus(userPublicKeyBase58);
+    return JSON.parse(result as string);
   }
 
-  async updateZkProgram(contractState: string, proof: JsonProof) {
-    return this.remoteApi.updateZkProgram(contractState, proof);
+  async createRegisterDIDTransaction(userPublicKeyBase58: string, witnessData: any) {
+    return this.remoteApi.createRegisterDIDTransaction(userPublicKeyBase58, witnessData);
   }
 
-  async createSettleStateTransaction(proof: JsonProof) {
-    return this.remoteApi.createSettleStateTransaction(proof);
-  }
-
-  async proveSettleStateTransaction() {
-    return this.remoteApi.proveSettleStateTransaction();
+  async proveTransaction() {
+    return this.remoteApi.proveTransaction();
   }
 
   async getTransactionJSON() {

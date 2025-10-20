@@ -1,4 +1,8 @@
 {
   "version": 1,
-  "deployAliases": {}
+  "deployAliases": {},
+  "deployer": {
+    "privateKey": "EKEqrvJf5F5FPmLZixLo3iHQR6kG3Ldgr9kByPBNkTvTjqPowEyK",
+    "publicKey": "B62qisMwygWT9F4BrSasaKRJ5LiQZaFXmY5c3Cej4icjjc5mPRbeNKx"
+  }
 }

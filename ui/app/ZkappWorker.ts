@@ -1,65 +1,29 @@
-import { Mina, PublicKey, fetchAccount, Field, JsonProof, Cache } from 'o1js';
+import { Mina, PublicKey, fetchAccount, Field, MerkleWitness, Poseidon } from 'o1js';
 import * as Comlink from "comlink";
-import { AddProgramProof } from "../../contracts/src/AddZkProgram";
-import type { Add } from "../../contracts/src/Add";
-import type { AddZkProgram } from "../../contracts/src/AddZkProgram";
-import cacheJSONList from "./cache.json";
+import type { DIDRegistry } from "../../contracts/src/DIDRegistry";
+import type { ZKPVerifier } from "../../contracts/src/ZKPVerifier";
 
 type Transaction = Awaited<ReturnType<typeof Mina.transaction>>;
 
 const state = {
-  AddInstance: null as null | typeof Add,
-  zkappInstance: null as null | Add,
-  AddZkProgramInstance: null as null | typeof AddZkProgram,
+  DIDRegistryInstance: null as any,
+  ZKPVerifierInstance: null as any,
+  AgeVerificationProgramInstance: null as any,
+  didRegistryContract: null as null | DIDRegistry,
+  zkpVerifierContract: null as null | ZKPVerifier,
   transaction: null as null | Transaction
 };
 
-const fetchFiles = async () => {
-  const cacheJson = cacheJSONList;
-  const cacheListPromises = cacheJson.files.map(async (file) => {
-  const [header, data] = await Promise.all([
-    fetch(`/cache/${file}.header`).then((res) => res.text()),
-    fetch(`/cache/${file}`).then((res) => res.text())
-    ]);
-    return { file, header, data };
-  });
-
-  const cacheList = await Promise.all(cacheListPromises);
-
-  return cacheList.reduce((acc: any, { file, header, data }) => {
-    acc[file] = { file, header, data };
-    return acc;
-  }, {});
-};
-
-const FileSystem = (files: any): Cache => ({
-  read({ persistentId, uniqueId, dataType }: any) {
-    if (!files[persistentId]) {
-      return undefined;
-    }
-
-    const currentId = files[persistentId].header;
-
-    if (currentId !== uniqueId) {
-      return undefined;
-    }
-
-    if (dataType === "string") {
-      console.log("found in cache:", { persistentId, uniqueId, dataType });
-
-      return new TextEncoder().encode(files[persistentId].data);
-    }
-    return undefined;
-  },
-
-  write({ persistentId, uniqueId, dataType }: any, data: any) {
-    console.log({ persistentId, uniqueId, dataType });
-  },
-
-  canWrite: true
-});
-
 export const api = {
+
+  async setActiveInstanceToBerkeley() {
+    const Network = Mina.Network({
+      mina: "https://api.minascan.io/node/berkeley/v1/graphql",
+      archive: "https://api.minascan.io/archive/berkeley/v1/graphql"
+    });
+    console.log("Berkeley testnet network instance configured");
+    Mina.setActiveInstance(Network);
+  },
 
   async setActiveInstanceToDevnet() {
     const Network = Mina.Network(
@@ -69,67 +33,76 @@ export const api = {
     Mina.setActiveInstance(Network);
   },
 
-  async loadContract() {
-    const { Add } = await import("../../contracts/build/src/Add.js");
-    const { AddZkProgram } = await import(
-      "../../contracts/build/src/AddZkProgram.js"
+  async loadContracts() {
+    const { DIDRegistry } = await import("../../contracts/build/src/DIDRegistry.js");
+    const { ZKPVerifier } = await import("../../contracts/build/src/ZKPVerifier.js");
+    const { AgeVerificationProgram } = await import(
+      "../../contracts/build/src/AgeVerificationProgram.js"
     );
-    state.AddInstance = Add;
-    state.AddZkProgramInstance = AddZkProgram;
+    state.DIDRegistryInstance = DIDRegistry;
+    state.ZKPVerifierInstance = ZKPVerifier;
+    state.AgeVerificationProgramInstance = AgeVerificationProgram;
   },
 
-  async compileZkProgram() {
-    await state.AddZkProgramInstance!.compile();
-  },
-  async compileContract() {
-    const cacheFiles = await fetchFiles();
-    await state.AddInstance!.compile({ cache: FileSystem(cacheFiles) });
+  async compileAgeVerificationProgram() {
+    console.log("Compiling AgeVerificationProgram...");
+    await state.AgeVerificationProgramInstance!.compile();
+    console.log("AgeVerificationProgram compiled");
   },
 
-async fetchAccount(publicKey58: string) {
-  const publicKey = PublicKey.fromBase58(publicKey58);
-  return fetchAccount({ publicKey });
-},
+  async compileDIDRegistry() {
+    console.log("Compiling DIDRegistry contract...");
+    await state.DIDRegistryInstance!.compile();
+    console.log("DIDRegistry contract compiled");
+  },
 
-async initZkappInstance(publicKey58: string) {
-  const publicKey = PublicKey.fromBase58(publicKey58);
-  state.zkappInstance = new state.AddInstance!(publicKey);
-},
+  async compileZKPVerifier() {
+    console.log("Compiling ZKPVerifier contract...");
+    await state.ZKPVerifierInstance!.compile();
+    console.log("ZKPVerifier contract compiled");
+  },
 
-async initZkProgram(num: string) {
-  const init = await state.AddZkProgramInstance!.init(Field(num));
-  return init.proof.toJSON();
-},
+  async fetchAccount(publicKey58: string) {
+    const publicKey = PublicKey.fromBase58(publicKey58);
+    return fetchAccount({ publicKey });
+  },
 
-async getNum() {
-  const num = await state.zkappInstance!.num.get();
-  return JSON.stringify(num.toJSON());
-},
+  async initDIDRegistryInstance(publicKey58: string) {
+    const publicKey = PublicKey.fromBase58(publicKey58);
+    state.didRegistryContract = new state.DIDRegistryInstance!(publicKey);
+  },
 
-async updateZkProgram(contractState: string, proof: JsonProof) {
-  const previousProof = await AddProgramProof.fromJSON(proof);
-  const update = await state.AddZkProgramInstance!.update(
-    Field(contractState),
-    previousProof
-  );
+  async initZKPVerifierInstance(publicKey58: string) {
+    const publicKey = PublicKey.fromBase58(publicKey58);
+    state.zkpVerifierContract = new state.ZKPVerifierInstance!(publicKey);
+  },
 
-  return update.proof.toJSON();
-},
+  async getDIDStatus(userPublicKey58: string) {
+    const userPublicKey = PublicKey.fromBase58(userPublicKey58);
+    const didHash = Poseidon.hash(userPublicKey.toFields());
+    // Note: In real implementation, would check Merkle tree
+    return JSON.stringify({ exists: true, hash: didHash.toString() });
+  },
 
-async createSettleStateTransaction(proof: JsonProof) {
-  const zkProgramProof = await AddProgramProof.fromJSON(proof);
-  state.transaction = await Mina.transaction(async () => {
-    await state.zkappInstance!.settleState(zkProgramProof);
-  });
-},
+  async createRegisterDIDTransaction(
+    userPublicKey58: string,
+    witnessData: any
+  ) {
+    const userPublicKey = PublicKey.fromBase58(userPublicKey58);
+    // Note: Witness would be created from actual Merkle tree
+    state.transaction = await Mina.transaction(async () => {
+      // Simplified - in real implementation would use MerkleWitness
+      // await state.didRegistryContract!.registerDID(userPublicKey, witness);
+    });
+  },
 
-async proveSettleStateTransaction() {
-  await state.transaction!.prove();
-},
+  async proveTransaction() {
+    await state.transaction!.prove();
+  },
 
-async getTransactionJSON() {
-  return state.transaction!.toJSON();
-}
+  async getTransactionJSON() {
+    return state.transaction!.toJSON();
+  }
 }
 
 // Expose the API to be used by the main thread
