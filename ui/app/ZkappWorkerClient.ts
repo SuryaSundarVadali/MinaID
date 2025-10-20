@@ -3,64 +3,64 @@ import { Field, JsonProof } from "o1js";
 import * as Comlink from "comlink";
 
 export default class ZkappWorkerClient {
-   worker: Worker;
+  worker: Worker;
 
   // Proxy to interact with the worker's methods as if they were local
   remoteApi: Comlink.Remote<typeof import('./ZkappWorker').api>; 
   
-constructor() {
-  // Initialize the worker from the zkappWorker module
-  const worker = new Worker(new URL('./zkappWorker.ts', import.meta.url), { type: 'module' });  
-  // Wrap the worker with Comlink to enable direct method invocation
-  this.remoteApi = Comlink.wrap(worker);
-}  
+  constructor() {
+    // Initialize the worker from the ZkappWorker module
+    const worker = new Worker(new URL('./ZkappWorker.ts', import.meta.url), { type: 'module' });  
+    // Wrap the worker with Comlink to enable direct method invocation
+    this.remoteApi = Comlink.wrap(worker);
+  }  
 
-async setActiveInstanceToDevnet() {
-  return this.remoteApi.setActiveInstanceToDevnet();
-}
-async loadContract() {
-  return this.remoteApi.loadContract();
-}
+  async setActiveInstanceToDevnet() {
+    return this.remoteApi.setActiveInstanceToDevnet();
+  }
 
-async compileZkProgram() {
-  return this.remoteApi.compileZkProgram();
-}
+  async loadContract() {
+    return this.remoteApi.loadContract();
+  }
 
-async compileContract() {
-  return this.remoteApi.compileContract();
-}
+  async compileZkProgram() {
+    return this.remoteApi.compileZkProgram();
+  }
 
-async fetchAccount(publicKeyBase58: string) {
-  return this.remoteApi.fetchAccount(publicKeyBase58);
-}
+  async compileContract() {
+    return this.remoteApi.compileContract();
+  }
 
-async initZkappInstance(publicKeyBase58: string) {
-  return this.remoteApi.initZkappInstance(publicKeyBase58);
-}
+  async fetchAccount(publicKeyBase58: string) {
+    return this.remoteApi.fetchAccount(publicKeyBase58);
+  }
 
-async updateZkProgram(contractState: string, proof: JsonProof) {
-  return this.remoteApi.updateZkProgram(contractState, proof);
-}
+  async initZkappInstance(publicKeyBase58: string) {
+    return this.remoteApi.initZkappInstance(publicKeyBase58);
+  }
 
-async getNum(): Promise<Field> {
-  const result = await this.remoteApi.getNum();
-  return Field.fromJSON(JSON.parse(result as string));
-}
+  async getNum(): Promise<Field> {
+    const result = await this.remoteApi.getNum();
+    return Field.fromJSON(JSON.parse(result as string));
+  }
 
-async initZkProgram(num: string) {
-  return this.remoteApi.initZkProgram(num);
-}
+  async initZkProgram(num: string) {
+    return this.remoteApi.initZkProgram(num);
+  }
 
-async createSettleStateTransaction(proof: JsonProof) {
-  return this.remoteApi.createSettleStateTransaction(proof);
-}
+  async updateZkProgram(contractState: string, proof: JsonProof) {
+    return this.remoteApi.updateZkProgram(contractState, proof);
+  }
 
-async proveSettleStateTransaction() {
-  return this.remoteApi.proveSettleStateTransaction();
-}
+  async createSettleStateTransaction(proof: JsonProof) {
+    return this.remoteApi.createSettleStateTransaction(proof);
+  }
 
-async getTransactionJSON() {
-  return this.remoteApi.getTransactionJSON();
-}
+  async proveSettleStateTransaction() {
+    return this.remoteApi.proveSettleStateTransaction();
+  }
 
+  async getTransactionJSON() {
+    return this.remoteApi.getTransactionJSON();
+  }
 }
