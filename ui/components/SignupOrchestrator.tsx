@@ -46,7 +46,11 @@ interface SignupState {
   loading: boolean;
 }
 
-export function SignupOrchestrator() {
+interface SignupOrchestratorProps {
+  onSuccess?: () => void;
+}
+
+export function SignupOrchestrator({ onSuccess }: SignupOrchestratorProps = {}) {
   const { connectAuroWallet, connectMetamask, storePrivateKey } = useWallet();
   const { createPasskey, isSupported: isPasskeySupported } = usePasskey();
 
@@ -461,7 +465,13 @@ export function SignupOrchestrator() {
             </div>
 
             <button
-              onClick={() => window.location.href = '/dashboard'}
+              onClick={() => {
+                if (onSuccess) {
+                  onSuccess();
+                } else {
+                  window.location.href = '/dashboard';
+                }
+              }}
               className="px-8 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition"
             >
               Go to Dashboard

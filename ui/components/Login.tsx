@@ -31,7 +31,11 @@ interface LoginState {
   success?: boolean;
 }
 
-export function Login() {
+interface LoginProps {
+  onSuccess?: () => void;
+}
+
+export function Login({ onSuccess }: LoginProps = {}) {
   const router = useRouter();
   const { login } = useWallet();
   const { authenticateWithPasskey, listPasskeys, isSupported } = usePasskey();
@@ -65,10 +69,16 @@ export function Login() {
 
       setState({ loading: false, success: true });
 
-      // Redirect to dashboard
-      setTimeout(() => {
-        router.push('/dashboard');
-      }, 1000);
+      // Call success callback or redirect
+      if (onSuccess) {
+        setTimeout(() => {
+          onSuccess();
+        }, 1000);
+      } else {
+        setTimeout(() => {
+          router.push('/dashboard');
+        }, 1000);
+      }
 
     } catch (error: any) {
       setState({
@@ -95,7 +105,13 @@ export function Login() {
       await login(authResult.id);
 
       setState({ loading: false, success: true });
-      router.push('/dashboard');
+      
+      // Call success callback or redirect
+      if (onSuccess) {
+        onSuccess();
+      } else {
+        router.push('/dashboard');
+      }
 
     } catch (error: any) {
       setState({

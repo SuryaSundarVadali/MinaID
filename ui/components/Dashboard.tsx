@@ -22,7 +22,11 @@ import { usePasskey } from '../hooks/usePasskey';
 import { generateAgeProof, generateKYCProof, type AgeProof, type KYCProof } from '../lib/ProofGenerator';
 import { PrivateKey } from 'o1js';
 
-export function Dashboard() {
+interface DashboardProps {
+  onLogout?: () => void;
+}
+
+export function Dashboard({ onLogout }: DashboardProps = {}) {
   const router = useRouter();
   const { session, logout, loadPrivateKey, isConnected } = useWallet();
   const { listPasskeys, deletePasskey } = usePasskey();
@@ -88,7 +92,11 @@ export function Dashboard() {
    */
   const handleLogout = () => {
     logout();
-    router.push('/login');
+    if (onLogout) {
+      onLogout();
+    } else {
+      router.push('/login');
+    }
   };
 
   if (!session) {
