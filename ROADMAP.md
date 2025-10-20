@@ -242,70 +242,85 @@
 
 ---
 
-## 📅 Phase 3: Backend Services (PLANNED)
+## Phase 3: Deployment & Testing
 
-### 3.1 Issuer Service (Node.js + Express)
+**Status**: In Progress (Deployment scripts ready)  
+**Priority**: High (Blocking end-to-end testing)  
+**Timeline**: 1 week
 
-- [ ] **Setup Express Server**
-  - [ ] Configure CORS
-  - [ ] Add rate limiting
-  - [ ] Setup logging (Winston)
-  - [ ] Error handling middleware
+### 3.1 Deployment Automation ✅
 
-- [ ] **POST /issue-credential Endpoint**
-  - [ ] Receive user DID and ZK proof
-  - [ ] Verify ZK proof against blockchain
-  - [ ] Create W3C Verifiable Credential
-  - [ ] Sign credential with issuer key
-  - [ ] Store credential metadata (optional)
-  - [ ] Return signed VC to client
+**Status**: Complete  
+**Files**: `contracts/scripts/deploy.ts` (400 lines)
 
-- [ ] **Credential Management**
-  - [ ] Database schema for issued credentials
-  - [ ] Revocation list management
-  - [ ] Credential expiry handling
-  - [ ] Batch issuance support
+**Features**:
+- [x] Deploy script for Berkeley testnet
+- [x] Auto-generate deployer keys
+- [x] Balance checking and validation  
+- [x] Auto-update config.json with addresses
+- [x] Auto-update ui/.env.local
+- [x] Error handling and logging
+- [x] Minascan explorer links
+- [x] Multi-network support
 
-- [ ] **Security**
-  - [ ] Secure key storage (HSM or KMS)
-  - [ ] Input validation
-  - [ ] SQL injection prevention
-  - [ ] XSS protection
+**Commands**:
+```bash
+cd contracts
+npm run deploy         # Deploy to Berkeley testnet
+npm run deploy:local   # Deploy to local Mina network
+```
 
-### 3.2 Verifier Service (Node.js + Express)
+---
 
-- [ ] **Setup Express Server**
-  - [ ] Similar security config as Issuer
+### 3.2 Testnet Deployment ⏳
 
-- [ ] **GET /get-challenge Endpoint**
-  - [ ] Generate secure random nonce
-  - [ ] Store nonce with expiry (Redis)
-  - [ ] Return nonce to client
+**Status**: Ready to Deploy  
+**Blocking**: Need deployer account funded with testnet MINA
 
-- [ ] **POST /login Endpoint**
-  - [ ] Verify signature of challenge
-  - [ ] Verify ZK proof on-chain
-  - [ ] Check nonce hasn't been used (prevent replay)
-  - [ ] Generate JWT session token
-  - [ ] Return token with expiry
+**Steps**:
+1. ⏳ Run `npm run deploy` in contracts/
+2. ⏳ Script generates deployer key (if not exists)
+3. ⏳ Fund deployer account via https://faucet.minaprotocol.com/
+4. ⏳ Script deploys both contracts
+5. ⏳ Verify on Minascan
+6. ⏳ Test contract interaction
 
-- [ ] **POST /verify-credential Endpoint**
-  - [ ] Receive credential and proof
-  - [ ] Verify on ZKPVerifier contract
-  - [ ] Return verification result
+**Expected Outputs**:
+- DIDRegistry contract address  
+- ZKPVerifier contract address
+- Updated config.json
+- Updated ui/.env.local
+- Minascan explorer links
 
-- [ ] **Session Management**
-  - [ ] JWT token generation
-  - [ ] Token refresh mechanism
-  - [ ] Logout/revoke tokens
-  - [ ] Session storage (Redis)
+---
 
-### Phase 3 Timeline
+### 3.3 o1js Web Worker Setup ⏳
 
-**Estimated Duration**: 2 weeks
+**Status**: Not Started  
+**Priority**: High (Required for real ZK proofs)
 
-- Week 1: Issuer Service
-- Week 2: Verifier Service
+**Tasks**:
+- [ ] Configure Next.js for o1js Web Workers
+- [ ] Create worker files in ui/public/workers/
+- [ ] Update next.config.mjs
+- [ ] Fix contract imports in ContractInterface.ts
+- [ ] Test proof generation performance
+- [ ] Replace simulated proofs with real ZkProgram
+
+---
+
+### 3.4 Integration Testing ⏳
+
+**Status**: Not Started (After deployment)
+
+**Test Cases**:
+1. [ ] Complete signup flow end-to-end
+2. [ ] Complete login flow with biometric
+3. [ ] Proof generation (18+, 21+)
+4. [ ] Verify proofs on-chain
+5. [ ] DID management operations
+
+---
 
 ---
 
