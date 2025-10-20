@@ -2,7 +2,19 @@
   "version": 1,
   "deployAliases": {},
   "deployer": {
-    "privateKey": "EKEqrvJf5F5FPmLZixLo3iHQR6kG3Ldgr9kByPBNkTvTjqPowEyK",
-    "publicKey": "B62qisMwygWT9F4BrSasaKRJ5LiQZaFXmY5c3Cej4icjjc5mPRbeNKx"
+    "privateKey": "EKEpKAJmk5UqjTVbXgWHoyWWTAx7PWbuxnd8gLh4kkNX7ESTdWFY",
+    "publicKey": "B62qqWYLoCqdYTbBBEYBfyabrkWtAiNamjCsf3en5QiHE7d4irz2UN5"
+  },
+  "contracts": {
+    "didRegistry": {
+      "address": "B62qjuEhj9YjZyKTD75ywH7vY73DgUTC5bVxSCo3meirg8nGnV3CYjk",
+      "network": "devnet",
+      "deployedAt": "2025-10-20T13:42:35.187Z"
+    },
+    "zkpVerifier": {
+      "address": "B62qrfTGCDP1KEx1PQa6mWGjV2b8wckbdcQRhi2Mu3AGfRYrjjnnfxW",
+      "network": "devnet",
+      "deployedAt": "2025-10-20T13:42:35.188Z"
+    }
   }
 }

@@ -11,7 +11,39 @@ import {
   Poseidon,
   Bool,
   Provable,
+  Struct,
 } from 'o1js';
+
+// Event structures
+export class DIDRegisteredEvent extends Struct({
+  publicKeyX: Field,
+  didHash: Field,
+  timestamp: Field,
+}) {}
+
+
+export class DIDRevokedEvent extends Struct({
+  publicKeyX: Field,
+  timestamp: Field,
+}) {}
+
+export class DIDUpdatedEvent extends Struct({
+  publicKeyX: Field,
+  oldHash: Field,
+  newHash: Field,
+  timestamp: Field,
+}) {}
+
+export class DIDVerifiedEvent extends Struct({
+  publicKeyX: Field,
+  didHash: Field,
+  exists: Field,
+}) {}
+
+export class OwnershipTransferredEvent extends Struct({
+  oldOwnerX: Field,
+  newOwnerX: Field,
+}) {}
 
 /**
  * DIDRegistry Smart Contract
@@ -26,6 +58,15 @@ import {
  * - Query DID status and document hashes
  */
 export class DIDRegistry extends SmartContract {
+  // Event declarations
+  events = {
+    DIDRegistered: DIDRegisteredEvent,
+    DIDRevoked: DIDRevokedEvent,
+    DIDUpdated: DIDUpdatedEvent,
+    DIDVerified: DIDVerifiedEvent,
+    OwnershipTransferred: OwnershipTransferredEvent,
+  };
+
   // On-chain state: Root of the Merkle Map storing DIDs
   // Key: Hash of public key, Value: Hash of DID document
   @state(Field) didMapRoot = State<Field>();
@@ -98,11 +139,11 @@ export class DIDRegistry extends SmartContract {
     this.totalDIDs.set(currentTotal.add(1));
 
     // Emit event for indexers
-    this.emitEvent('DIDRegistered', {
-      publicKey: userPublicKey,
+    this.emitEvent('DIDRegistered', new DIDRegisteredEvent({
+      publicKeyX: userPublicKey.x,
       didHash: didDocumentHash,
-      timestamp: this.network.blockchainLength.getAndRequireEquals(),
-    });
+      timestamp: this.network.blockchainLength.getAndRequireEquals().value,
+    }));
   }
 
   /**
@@ -151,10 +192,10 @@ export class DIDRegistry extends SmartContract {
     this.totalDIDs.set(currentTotal.sub(1));
 
     // Emit revocation event
-    this.emitEvent('DIDRevoked', {
-      publicKey: userPublicKey,
-      timestamp: this.network.blockchainLength.getAndRequireEquals(),
-    });
+    this.emitEvent('DIDRevoked', new DIDRevokedEvent({
+      publicKeyX: userPublicKey.x,
+      timestamp: this.network.blockchainLength.getAndRequireEquals().value,
+    }));
   }
 
   /**
@@ -196,12 +237,12 @@ export class DIDRegistry extends SmartContract {
     this.didMapRoot.set(newRoot);
 
     // Emit update event
-    this.emitEvent('DIDUpdated', {
-      publicKey: userPublicKey,
+    this.emitEvent('DIDUpdated', new DIDUpdatedEvent({
+      publicKeyX: userPublicKey.x,
       oldHash: oldDidHash,
       newHash: newDidDocumentHash,
-      timestamp: this.network.blockchainLength.getAndRequireEquals(),
-    });
+      timestamp: this.network.blockchainLength.getAndRequireEquals().value,
+    }));
   }
 
   /**
@@ -231,11 +272,11 @@ export class DIDRegistry extends SmartContract {
     const [, didHash] = witness.computeRootAndKey(Field(0));
     
     // Emit verification event for off-chain queries
-    this.emitEvent('DIDVerified', {
-      publicKey: userPublicKey,
+    this.emitEvent('DIDVerified', new DIDVerifiedEvent({
+      publicKeyX: userPublicKey.x,
       didHash: didHash,
-      exists: didHash.greaterThan(Field(0)),
-    });
+      exists: Provable.if(didHash.greaterThan(Field(0)), Field(1), Field(0)),
+    }));
   }
 
   /**
@@ -254,9 +295,9 @@ export class DIDRegistry extends SmartContract {
     this.owner.set(newOwner);
 
     // Emit ownership transfer event
-    this.emitEvent('OwnershipTransferred', {
-      oldOwner: currentOwner,
-      newOwner: newOwner,
-    });
+    this.emitEvent('OwnershipTransferred', new OwnershipTransferredEvent({
+      oldOwnerX: currentOwner.x,
+      newOwnerX: newOwner.x,
+    }));
   }
 }

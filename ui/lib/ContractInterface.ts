@@ -120,33 +120,49 @@ export class ContractInterface {
     merkleWitness: MerkleMapWitness
   ): Promise<TransactionResult> {
     try {
-      // Ensure account exists and is funded
+      // Ensure account exists and is funded (fetch BEFORE transaction)
+      console.log('Fetching account for DID:', did.toBase58());
       await fetchAccount({ publicKey: did });
 
-      // Create transaction
-      const tx = await Mina.transaction({ sender: did }, async () => {
-        // Call registerDID method
-        // await this.didRegistry!.registerDID(did, documentHash, merkleWitness);
-        
-        // Placeholder transaction
-        console.log('Registering DID:', did.toBase58());
-        console.log('Document hash:', documentHash.toString());
-      });
+      // Fetch contract account
+      const contractAddress = PublicKey.fromBase58(this.networkConfig.didRegistryAddress);
+      await fetchAccount({ publicKey: contractAddress });
 
-      // Sign and prove transaction
+      console.log('Creating transaction for DID registration...');
+
+      // Create transaction (no nested transactions!)
+      const tx = await Mina.transaction(
+        { sender: did, fee: 100_000_000 }, // 0.1 MINA fee
+        async () => {
+          // Call registerDID method
+          // await this.didRegistry!.registerDID(did, documentHash, merkleWitness, signature);
+          
+          // Placeholder for now - contract not yet instantiated
+          console.log('Registering DID:', did.toBase58());
+          console.log('Document hash:', documentHash.toString());
+          console.log('Contract address:', contractAddress.toBase58());
+        }
+      );
+
+      console.log('Proving transaction...');
       await tx.prove();
+      
+      console.log('Signing transaction...');
       await tx.sign([privateKey]);
 
-      // Send transaction
+      console.log('Sending transaction...');
       const pendingTx = await tx.send();
       
-      if (!pendingTx.status || pendingTx.status === 'pending') {
-        // Wait for transaction confirmation
+      console.log('Transaction sent! Hash:', pendingTx.hash);
+
+      // Wait for confirmation
+      if (pendingTx.status === 'pending') {
+        console.log('Waiting for transaction confirmation...');
         await pendingTx.wait();
       }
 
       return {
-        hash: pendingTx.hash,
+        hash: pendingTx.hash || '',
         success: true,
         events: [], // Extract events from transaction
       };
@@ -384,20 +400,20 @@ export class ContractInterface {
  * @returns Network configuration
  */
 export function createNetworkConfig(
-  networkId: 'mainnet' | 'devnet' | 'berkeley' | 'testworld2' | 'local' = 'berkeley'
+  networkId: 'mainnet' | 'devnet' | 'berkeley' | 'testworld2' | 'local' = 'devnet'
 ): NetworkConfig {
   const configs = {
     mainnet: {
       networkId: 'mainnet' as const,
-      minaEndpoint: 'https://proxy.mainnet.minaexplorer.com/graphql',
-      archiveEndpoint: 'https://archive.mainnet.minaexplorer.com',
+      minaEndpoint: 'https://api.minascan.io/node/mainnet/v1/graphql',
+      archiveEndpoint: 'https://api.minascan.io/archive/mainnet/v1/graphql',
       didRegistryAddress: process.env.NEXT_PUBLIC_DID_REGISTRY_MAINNET || '',
       zkpVerifierAddress: process.env.NEXT_PUBLIC_ZKP_VERIFIER_MAINNET || '',
     },
     devnet: {
       networkId: 'devnet' as const,
-      minaEndpoint: 'https://proxy.devnet.minaexplorer.com/graphql',
-      archiveEndpoint: 'https://archive.devnet.minaexplorer.com',
+      minaEndpoint: 'https://api.minascan.io/node/devnet/v1/graphql',
+      archiveEndpoint: 'https://api.minascan.io/archive/devnet/v1/graphql',
       didRegistryAddress: process.env.NEXT_PUBLIC_DID_REGISTRY_DEVNET || '',
       zkpVerifierAddress: process.env.NEXT_PUBLIC_ZKP_VERIFIER_DEVNET || '',
     },

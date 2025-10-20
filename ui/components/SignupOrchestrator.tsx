@@ -51,7 +51,7 @@ interface SignupOrchestratorProps {
 }
 
 export function SignupOrchestrator({ onSuccess }: SignupOrchestratorProps = {}) {
-  const { connectAuroWallet, connectMetamask, storePrivateKey } = useWallet();
+  const { connectAuroWallet, connectMetamask, storePrivateKey, loadPrivateKey } = useWallet();
   const { createPasskey, isSupported: isPasskeySupported } = usePasskey();
 
   const [state, setState] = useState<SignupState>({
@@ -194,8 +194,8 @@ export function SignupOrchestrator({ onSuccess }: SignupOrchestratorProps = {}) 
         `MinaID - ${state.aadharData?.name || 'User'}`
       );
 
-      // Encrypt and store private key with Passkey
-      await storePrivateKey('auro', minaPrivateKey.toBase58(), passkey.id);
+      // Encrypt and store private key with Passkey (pass DID since no session exists during signup)
+      await storePrivateKey('auro', minaPrivateKey.toBase58(), passkey.id, state.did);
 
       // Clear plaintext private key from memory
       setMinaPrivateKey(null);
@@ -250,15 +250,26 @@ export function SignupOrchestrator({ onSuccess }: SignupOrchestratorProps = {}) 
       const didKey = Poseidon.hash(PublicKey.fromBase58(state.did).toFields());
       const witness = merkleMap.getWitness(didKey);
 
-      // Temporarily load private key for transaction signing
-      // (In production, this would require Passkey authentication)
-      const tempPrivateKey = PrivateKey.random(); // Placeholder
+      // Load actual private key using Passkey authentication
+      if (!state.passkeyId) {
+        throw new Error('Passkey ID not found. Please complete Step 4 first.');
+      }
+
+      console.log('Loading private key with Passkey...');
+      const privateKeyBase58 = await loadPrivateKey('auro', state.passkeyId, state.did);
+      
+      if (!privateKeyBase58) {
+        throw new Error('Failed to load private key. Please try Step 4 again.');
+      }
+
+      const actualPrivateKey = PrivateKey.fromBase58(privateKeyBase58);
+      console.log('Private key loaded successfully');
 
       // Register DID on-chain
       const result = await contractInterface.registerDID(
         PublicKey.fromBase58(state.did),
         documentHashField,
-        tempPrivateKey,
+        actualPrivateKey,
         witness
       );
 

@@ -50,7 +50,10 @@ export function Dashboard({ onLogout }: DashboardProps = {}) {
    * Generate age proof
    */
   const handleGenerateAgeProof = async (minimumAge: number) => {
-    if (!session) return;
+    if (!session) {
+      setError('No active session. Please log in again.');
+      return;
+    }
 
     setIsGenerating(true);
     setError(undefined);

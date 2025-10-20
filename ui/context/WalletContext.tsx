@@ -65,9 +65,9 @@ export interface WalletContextValue {
   switchPrimaryWallet: (type: WalletType) => void;
 
   // Key management
-  storePrivateKey: (type: WalletType, privateKey: string, passkeyId: string) => Promise<void>;
-  loadPrivateKey: (type: WalletType, passkeyId: string) => Promise<string>;
-  hasStoredKey: (type: WalletType) => boolean;
+  storePrivateKey: (type: WalletType, privateKey: string, passkeyId: string, did?: string) => Promise<void>;
+  loadPrivateKey: (type: WalletType, passkeyId: string, did?: string) => Promise<string>;
+  hasStoredKey: (type: WalletType, did?: string) => boolean;
 
   // Session management
   login: (passkeyId: string) => Promise<void>;
@@ -91,6 +91,34 @@ export function WalletProvider({ children }: WalletProviderProps) {
   const { authenticateWithPasskey } = usePasskey();
 
   const isConnected = session !== null && session.expiresAt > Date.now();
+
+  // Restore session from localStorage on mount
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+
+    // Try to find any existing session
+    const keys = Object.keys(localStorage);
+    const sessionKey = keys.find(key => key.startsWith('minaid:session:'));
+    
+    if (sessionKey) {
+      try {
+        const storedSession = localStorage.getItem(sessionKey);
+        if (storedSession) {
+          const parsed: WalletSession = JSON.parse(storedSession);
+          
+          // Check if session is still valid
+          if (parsed.expiresAt > Date.now()) {
+            setSession(parsed);
+          } else {
+            // Clean up expired session
+            localStorage.removeItem(sessionKey);
+          }
+        }
+      } catch (err) {
+        console.error('Failed to restore session:', err);
+      }
+    }
+  }, []);
 
   /**
    * Connect to Auro Wallet (Mina)
@@ -225,20 +253,28 @@ export function WalletProvider({ children }: WalletProviderProps) {
 
   /**
    * Store encrypted private key
+   * @param type Wallet type
+   * @param privateKey Private key to store
+   * @param passkeyId Passkey ID for encryption
+   * @param did Optional DID for signup (when no session exists yet)
    */
   const storePrivateKey = useCallback(async (
     type: WalletType,
     privateKey: string,
-    passkeyId: string
+    passkeyId: string,
+    did?: string
   ): Promise<void> => {
-    if (!session) {
-      throw new Error('No active session');
+    // Use provided DID (for signup) or session DID
+    const effectiveDid = did || session?.did;
+    
+    if (!effectiveDid) {
+      throw new Error('No DID provided and no active session');
     }
 
     try {
       // Create unique storage key for this wallet type
       const storageKey: StorageKey = {
-        did: `${session.did}:${type}`,
+        did: `${effectiveDid}:${type}`,
         type: 'privateKey',
       };
 
@@ -251,19 +287,26 @@ export function WalletProvider({ children }: WalletProviderProps) {
 
   /**
    * Load and decrypt private key
+   * @param type Wallet type
+   * @param passkeyId Passkey ID for decryption
+   * @param did Optional DID (when no session exists yet)
    */
   const loadPrivateKey = useCallback(async (
     type: WalletType,
-    passkeyId: string
+    passkeyId: string,
+    did?: string
   ): Promise<string> => {
-    if (!session) {
-      throw new Error('No active session');
+    // Use provided DID (for signup) or session DID
+    const effectiveDid = did || session?.did;
+    
+    if (!effectiveDid) {
+      throw new Error('No DID provided and no active session');
     }
 
     try {
       // Create storage key
       const storageKey: StorageKey = {
-        did: `${session.did}:${type}`,
+        did: `${effectiveDid}:${type}`,
         type: 'privateKey',
       };
 
@@ -282,14 +325,19 @@ export function WalletProvider({ children }: WalletProviderProps) {
 
   /**
    * Check if private key is stored
+   * @param type Wallet type
+   * @param did Optional DID (when no session exists yet)
    */
-  const hasStoredKey = useCallback((type: WalletType): boolean => {
-    if (!session) {
+  const hasStoredKey = useCallback((type: WalletType, did?: string): boolean => {
+    // Use provided DID (for signup) or session DID
+    const effectiveDid = did || session?.did;
+    
+    if (!effectiveDid) {
       return false;
     }
 
     const storageKey: StorageKey = {
-      did: `${session.did}:${type}`,
+      did: `${effectiveDid}:${type}`,
       type: 'privateKey',
     };
 
@@ -340,6 +388,9 @@ export function WalletProvider({ children }: WalletProviderProps) {
       // Store session
       localStorage.setItem(sessionKey, JSON.stringify(newSession));
       
+      // Also store a simple marker for quick checks
+      localStorage.setItem('minaid_session', 'active');
+      
       setIsLoading(false);
     } catch (err: any) {
       const errorMessage = err.message || 'Failed to login';
@@ -358,6 +409,9 @@ export function WalletProvider({ children }: WalletProviderProps) {
       const sessionKey = `minaid:session:${session.did}`;
       localStorage.removeItem(sessionKey);
     }
+
+    // Clear session marker
+    localStorage.removeItem('minaid_session');
 
     setSession(null);
     setError(null);

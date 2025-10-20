@@ -26,9 +26,9 @@ import { DIDRegistry } from '../src/DIDRegistry.js';
 import { ZKPVerifier } from '../src/ZKPVerifier.js';
 
 // Network configuration
-const NETWORK = 'berkeley';
-const MINA_ENDPOINT = 'https://proxy.berkeley.minaexplorer.com/graphql';
-const ARCHIVE_ENDPOINT = 'https://archive.berkeley.minaexplorer.com';
+const NETWORK = 'devnet';
+const MINA_ENDPOINT = 'https://api.minascan.io/node/devnet/v1/graphql';
+const ARCHIVE_ENDPOINT = 'https://api.minascan.io/archive/devnet/v1/graphql';
 
 // Transaction fee (0.1 MINA)
 const FEE = 100_000_000;
@@ -61,7 +61,7 @@ function initNetwork() {
   });
   
   Mina.setActiveInstance(network);
-  console.log('✅ Connected to Berkeley testnet');
+  console.log('✅ Connected to Devnet');
 }
 
 /**
@@ -92,7 +92,7 @@ async function loadDeployerKey(): Promise<PrivateKey> {
     console.log('🔑 Generated new deployer key:');
     console.log('   Address:', publicKey.toBase58());
     console.log('   ⚠️  FUND THIS ADDRESS WITH MINA BEFORE DEPLOYING!');
-    console.log('   Get testnet MINA from: https://faucet.minaprotocol.com/');
+    console.log('   Get devnet MINA from: https://faucet.minaprotocol.com/?network=devnet');
     
     throw new Error('Please fund the deployer address and run the script again');
   } catch (error) {
@@ -118,7 +118,7 @@ async function checkBalance(publicKey: PublicKey): Promise<void> {
     if (balance < 1) {
       throw new Error(
         `Insufficient balance. Need at least 1 MINA for deployment. Current: ${balance} MINA\n` +
-        'Get testnet MINA from: https://faucet.minaprotocol.com/'
+        'Get devnet MINA from: https://faucet.minaprotocol.com/?network=devnet'
       );
     }
     
@@ -333,9 +333,9 @@ async function main() {
     console.log('   DIDRegistry: ', didRegistryAddress.toBase58());
     console.log('   ZKPVerifier: ', zkpVerifierAddress.toBase58());
     console.log('\n🌐 Network:     ', NETWORK);
-    console.log('🔗 Explorer:    ', `https://minascan.io/berkeley/account/${didRegistryAddress.toBase58()}`);
+    console.log('🔗 Explorer:    ', `https://minascan.io/devnet/account/${didRegistryAddress.toBase58()}`);
     console.log('\n💡 Next Steps:');
-    console.log('   1. Verify contracts on Minascan');
+    console.log('   1. Verify contracts on Minascan (Devnet)');
     console.log('   2. Test signup flow in UI');
     console.log('   3. Generate and verify proofs');
     

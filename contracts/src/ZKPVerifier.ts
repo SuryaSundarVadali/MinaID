@@ -12,6 +12,41 @@ import {
   Struct,
 } from 'o1js';
 
+// Event structures
+export class AgeVerifiedEvent extends Struct({
+  subjectX: Field,
+  minimumAge: Field,
+  timestamp: Field,
+}) {}
+
+export class KYCVerifiedEvent extends Struct({
+  subjectX: Field,
+  issuerX: Field,
+  timestamp: Field,
+}) {}
+
+export class CredentialVerifiedEvent extends Struct({
+  subjectX: Field,
+  issuerX: Field,
+  claimType: Field,
+  timestamp: Field,
+}) {}
+
+export class IssuerAddedEvent extends Struct({
+  issuerX: Field,
+  timestamp: Field,
+}) {}
+
+export class MinimumAgeUpdatedEvent extends Struct({
+  oldAge: Field,
+  newAge: Field,
+}) {}
+
+export class OwnershipTransferredEvent extends Struct({
+  oldOwnerX: Field,
+  newOwnerX: Field,
+}) {}
+
 /**
  * Credential Claim Structure
  * Represents a verifiable claim about a user
@@ -38,6 +73,16 @@ export class CredentialClaim extends Struct({
  * - Track verification events
  */
 export class ZKPVerifier extends SmartContract {
+  // Event declarations
+  events = {
+    AgeVerified: AgeVerifiedEvent,
+    KYCVerified: KYCVerifiedEvent,
+    CredentialVerified: CredentialVerifiedEvent,
+    IssuerAdded: IssuerAddedEvent,
+    MinimumAgeUpdated: MinimumAgeUpdatedEvent,
+    OwnershipTransferred: OwnershipTransferredEvent,
+  };
+
   // Root hash of trusted issuers (using Merkle tree for scalability)
   @state(Field) trustedIssuersRoot = State<Field>();
 
@@ -117,12 +162,11 @@ export class ZKPVerifier extends SmartContract {
     this.totalVerifications.set(currentTotal.add(1));
 
     // Emit verification event
-    this.emitEvent('AgeVerified', {
-      subject: subject,
-      issuer: issuerPublicKey,
-      timestamp: this.network.blockchainLength.getAndRequireEquals(),
-      verified: Bool(true),
-    });
+    this.emitEvent('AgeVerified', new AgeVerifiedEvent({
+      subjectX: subject.x,
+      minimumAge: minAge,
+      timestamp: this.network.blockchainLength.getAndRequireEquals().value,
+    }));
   }
 
   /**
@@ -161,12 +205,11 @@ export class ZKPVerifier extends SmartContract {
     this.totalVerifications.set(currentTotal.add(1));
 
     // Emit KYC verification event
-    this.emitEvent('KYCVerified', {
-      subject: subject,
-      issuer: issuerPublicKey,
-      timestamp: this.network.blockchainLength.getAndRequireEquals(),
-      verified: Bool(true),
-    });
+    this.emitEvent('KYCVerified', new KYCVerifiedEvent({
+      subjectX: subject.x,
+      issuerX: issuerPublicKey.x,
+      timestamp: this.network.blockchainLength.getAndRequireEquals().value,
+    }));
   }
 
   /**
@@ -186,8 +229,7 @@ export class ZKPVerifier extends SmartContract {
   ) {
     // Verify the claim hasn't expired
     const currentBlock = this.network.blockchainLength.getAndRequireEquals();
-    const currentBlockField = Field.from(currentBlock.toBigint());
-    claim.expiresAt.assertGreaterThan(currentBlockField, 'Credential expired');
+    claim.expiresAt.assertGreaterThan(currentBlock.value, 'Credential expired');
 
     // Verify the proof matches the commitment
     const expectedCommitment = Poseidon.hash([
@@ -207,13 +249,12 @@ export class ZKPVerifier extends SmartContract {
     this.totalVerifications.set(currentTotal.add(1));
 
     // Emit generic verification event
-    this.emitEvent('CredentialVerified', {
-      subject: claim.subject,
-      issuer: claim.issuer,
+    this.emitEvent('CredentialVerified', new CredentialVerifiedEvent({
+      subjectX: claim.subject.x,
+      issuerX: claim.issuer.x,
       claimType: claim.claimType,
-      timestamp: currentBlock,
-      verified: Bool(true),
-    });
+      timestamp: currentBlock.value,
+    }));
   }
 
   /**
@@ -298,10 +339,10 @@ export class ZKPVerifier extends SmartContract {
     this.trustedIssuersRoot.set(newRoot);
 
     // Emit event
-    this.emitEvent('IssuerAdded', {
-      issuer: issuerPublicKey,
-      timestamp: this.network.blockchainLength.getAndRequireEquals(),
-    });
+    this.emitEvent('IssuerAdded', new IssuerAddedEvent({
+      issuerX: issuerPublicKey.x,
+      timestamp: this.network.blockchainLength.getAndRequireEquals().value,
+    }));
   }
 
   /**
@@ -321,14 +362,17 @@ export class ZKPVerifier extends SmartContract {
     newMinimumAge.assertGreaterThanOrEqual(Field(0), 'Age must be positive');
     newMinimumAge.assertLessThanOrEqual(Field(120), 'Age must be reasonable');
 
+    // Get old age for event
+    const oldAge = this.minimumAge.getAndRequireEquals();
+
     // Update minimum age
     this.minimumAge.set(newMinimumAge);
 
     // Emit event
-    this.emitEvent('MinimumAgeUpdated', {
+    this.emitEvent('MinimumAgeUpdated', new MinimumAgeUpdatedEvent({
+      oldAge: oldAge,
       newAge: newMinimumAge,
-      timestamp: this.network.blockchainLength.getAndRequireEquals(),
-    });
+    }));
   }
 
   /**
@@ -347,9 +391,9 @@ export class ZKPVerifier extends SmartContract {
     this.owner.set(newOwner);
 
     // Emit ownership transfer event
-    this.emitEvent('OwnershipTransferred', {
-      oldOwner: currentOwner,
-      newOwner: newOwner,
-    });
+    this.emitEvent('OwnershipTransferred', new OwnershipTransferredEvent({
+      oldOwnerX: currentOwner.x,
+      newOwnerX: newOwner.x,
+    }));
   }
 }

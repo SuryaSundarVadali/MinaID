@@ -1,10 +1,11 @@
 'use client';
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import Image from 'next/image';
 import GradientBG from '../components/GradientBG.js';
 import { Login } from '../components/Login';
 import { SignupOrchestrator } from '../components/SignupOrchestrator';
 import { Dashboard } from '../components/Dashboard';
+import { useWallet } from '../context/WalletContext';
 import styles from '../styles/Home.module.css';
 import heroMinaLogo from '../public/assets/hero-mina-logo.svg';
 import arrowRightSmall from '../public/assets/arrow-right-small.svg';
@@ -13,35 +14,25 @@ type View = 'home' | 'login' | 'signup' | 'dashboard';
 
 export default function Home() {
   const [currentView, setCurrentView] = useState<View>('home');
-  const [isLoggedIn, setIsLoggedIn] = useState(false);
+  const { session, isConnected } = useWallet();
 
   // Check if user is logged in on mount
-  useState(() => {
-    if (typeof window !== 'undefined') {
-      const session = localStorage.getItem('minaid_session');
-      if (session) {
-        setIsLoggedIn(true);
-        setCurrentView('dashboard');
-      }
+  useEffect(() => {
+    if (isConnected && session) {
+      setCurrentView('dashboard');
     }
-  });
+  }, [isConnected, session]);
 
   const handleLoginSuccess = () => {
-    setIsLoggedIn(true);
     setCurrentView('dashboard');
   };
 
   const handleSignupSuccess = () => {
-    setIsLoggedIn(true);
     setCurrentView('dashboard');
   };
 
   const handleLogout = () => {
-    setIsLoggedIn(false);
     setCurrentView('home');
-    if (typeof window !== 'undefined') {
-      localStorage.removeItem('minaid_session');
-    }
   };
 
   return (
@@ -60,15 +51,15 @@ export default function Home() {
                   className="mb-8"
                 />
                 
-                <h1 className={styles.tagline + " text-white text-center mb-2"}>
+                <h1 className={styles.tagline + " text-center mb-2"} style={{ color: '#1a1a1a', fontWeight: '600' }}>
                   DECENTRALIZED IDENTITY WITH
                 </h1>
                 
-                <h2 className="text-6xl md:text-7xl font-bold text-white text-center mb-4" style={{ fontFamily: 'var(--font-monument-bold)' }}>
+                <h2 className="text-6xl md:text-7xl font-bold text-center mb-4" style={{ fontFamily: 'var(--font-monument-bold)', color: '#000000' }}>
                   MinaID
                 </h2>
                 
-                <p className="text-xl text-gray-300 text-center max-w-2xl mb-12" style={{ fontFamily: 'var(--font-monument-light)' }}>
+                <p className="text-xl text-center max-w-2xl mb-12" style={{ fontFamily: 'var(--font-monument-light)', color: '#2d2d2d', fontWeight: '500' }}>
                   The first biometric-bound zero-knowledge identity system.
                   <br />
                   Your credentials. Your biometric. Impossible to share.
@@ -94,40 +85,40 @@ export default function Home() {
                 <div className={styles.grid + " mt-12"}>
                   <div className="text-center p-6">
                     <div className="text-5xl mb-2">🔒</div>
-                    <h3 className="text-lg font-bold text-white mb-2" style={{ fontFamily: 'var(--font-monument-bold)' }}>
+                    <h3 className="text-lg font-bold mb-2" style={{ fontFamily: 'var(--font-monument-bold)', color: '#000000' }}>
                       Biometric Security
                     </h3>
-                    <p className="text-sm text-gray-300" style={{ fontFamily: 'var(--font-monument-light)' }}>
+                    <p className="text-sm" style={{ fontFamily: 'var(--font-monument-light)', color: '#2d2d2d' }}>
                       Private keys encrypted with Face ID / Touch ID
                     </p>
                   </div>
 
                   <div className="text-center p-6">
                     <div className="text-5xl mb-2">🔐</div>
-                    <h3 className="text-lg font-bold text-white mb-2" style={{ fontFamily: 'var(--font-monument-bold)' }}>
+                    <h3 className="text-lg font-bold mb-2" style={{ fontFamily: 'var(--font-monument-bold)', color: '#000000' }}>
                       Zero-Knowledge Proofs
                     </h3>
-                    <p className="text-sm text-gray-300" style={{ fontFamily: 'var(--font-monument-light)' }}>
+                    <p className="text-sm" style={{ fontFamily: 'var(--font-monument-light)', color: '#2d2d2d' }}>
                       Prove credentials without revealing data
                     </p>
                   </div>
 
                   <div className="text-center p-6">
                     <div className="text-5xl mb-2">🌐</div>
-                    <h3 className="text-lg font-bold text-white mb-2" style={{ fontFamily: 'var(--font-monument-bold)' }}>
+                    <h3 className="text-lg font-bold mb-2" style={{ fontFamily: 'var(--font-monument-bold)', color: '#000000' }}>
                       Peer-to-Peer
                     </h3>
-                    <p className="text-sm text-gray-300" style={{ fontFamily: 'var(--font-monument-light)' }}>
+                    <p className="text-sm" style={{ fontFamily: 'var(--font-monument-light)', color: '#2d2d2d' }}>
                       No servers. Full decentralization.
                     </p>
                   </div>
 
                   <div className="text-center p-6">
                     <div className="text-5xl mb-2">🇮🇳</div>
-                    <h3 className="text-lg font-bold text-white mb-2" style={{ fontFamily: 'var(--font-monument-bold)' }}>
+                    <h3 className="text-lg font-bold mb-2" style={{ fontFamily: 'var(--font-monument-bold)', color: '#000000' }}>
                       Aadhar Integration
                     </h3>
-                    <p className="text-sm text-gray-300" style={{ fontFamily: 'var(--font-monument-light)' }}>
+                    <p className="text-sm" style={{ fontFamily: 'var(--font-monument-light)', color: '#2d2d2d' }}>
                       Government ID verification built-in
                     </p>
                   </div>
