@@ -19,7 +19,7 @@
     "isolatedModules": true,
     "noEmit": true,
     "incremental": true,
-    "ignoreDeprecations": "6.0",
+    "ignoreDeprecations": "5.0",
     "resolveJsonModule": true,
     "jsx": "preserve",
     "useDefineForClassFields": false, 
