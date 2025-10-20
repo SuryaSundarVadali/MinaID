@@ -1,7 +1,9 @@
 import { Mina, PublicKey, fetchAccount, Field, MerkleWitness, Poseidon } from 'o1js';
 import * as Comlink from "comlink";
-import type { DIDRegistry } from "../../contracts/src/DIDRegistry";
-import type { ZKPVerifier } from "../../contracts/src/ZKPVerifier";
+
+// Note: These types are placeholders since contracts aren't used in Web Worker currently
+type DIDRegistry = any;
+type ZKPVerifier = any;
 
 type Transaction = Awaited<ReturnType<typeof Mina.transaction>>;
 
@@ -34,14 +36,13 @@ export const api = {
   },
 
   async loadContracts() {
-    const { DIDRegistry } = await import("../../contracts/build/src/DIDRegistry.js");
-    const { ZKPVerifier } = await import("../../contracts/build/src/ZKPVerifier.js");
-    const { AgeVerificationProgram } = await import(
-      "../../contracts/build/src/AgeVerificationProgram.js"
-    );
-    state.DIDRegistryInstance = DIDRegistry;
-    state.ZKPVerifierInstance = ZKPVerifier;
-    state.AgeVerificationProgramInstance = AgeVerificationProgram;
+    // Note: Contract loading disabled - contracts not available in web worker context
+    // In production, use ContractInterface instead
+    console.log("Contract loading skipped - using ContractInterface instead");
+    // Placeholder instances
+    state.DIDRegistryInstance = null;
+    state.ZKPVerifierInstance = null;
+    state.AgeVerificationProgramInstance = null;
   },
 
   async compileAgeVerificationProgram() {
