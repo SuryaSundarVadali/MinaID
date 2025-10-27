@@ -13,11 +13,14 @@ import { ProfileCard } from './dashboard/ProfileCard';
 import { CredentialsCard } from './dashboard/CredentialsCard';
 import { ProofsHistoryCard } from './dashboard/ProofsHistoryCard';
 import { QuickActionsCard } from './dashboard/QuickActionsCard';
+import { ProofGeneratorModal } from './proofs/ProofGeneratorModal';
 
 export function EnhancedDashboard() {
   const router = useRouter();
   const { session, logout } = useWallet();
   const [isLoading, setIsLoading] = useState(false);
+  const [isModalOpen, setIsModalOpen] = useState(false);
+  const [refreshTrigger, setRefreshTrigger] = useState(0);
 
   const handleLogout = () => {
     logout();
@@ -25,8 +28,13 @@ export function EnhancedDashboard() {
   };
 
   const handleGenerateProof = () => {
-    // TODO: Implement proof generation modal or navigate to proof page
-    alert('Proof generation coming in Phase 3!');
+    setIsModalOpen(true);
+  };
+
+  const handleProofGenerated = (proof: any) => {
+    console.log('[Dashboard] Proof generated:', proof);
+    // Trigger refresh of ProofsHistoryCard
+    setRefreshTrigger(prev => prev + 1);
   };
 
   if (!session) {
@@ -124,7 +132,7 @@ export function EnhancedDashboard() {
 
         {/* Proofs History Section */}
         <div className="mb-6">
-          <ProofsHistoryCard />
+          <ProofsHistoryCard key={refreshTrigger} />
         </div>
 
         {/* Security Status Banner */}
@@ -183,6 +191,13 @@ export function EnhancedDashboard() {
           </p>
         </div>
       </main>
+
+      {/* Proof Generator Modal */}
+      <ProofGeneratorModal
+        isOpen={isModalOpen}
+        onClose={() => setIsModalOpen(false)}
+        onProofGenerated={handleProofGenerated}
+      />
     </div>
   );
 }

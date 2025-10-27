@@ -6,22 +6,29 @@
 
 'use client';
 
-import React from 'react';
+import React, { useState, useEffect } from 'react';
+import { ProofStorage, type StoredProof } from '../../lib/ProofStorage';
 
-interface ProofHistoryItem {
-  id: string;
-  type: 'age' | 'kyc' | 'composite';
-  createdAt: number;
-  status: 'pending' | 'verified' | 'failed';
-  verifier?: string;
-  metadata?: Record<string, any>;
-}
+export function ProofsHistoryCard() {
+  const [proofs, setProofs] = useState<StoredProof[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
 
-interface ProofsHistoryCardProps {
-  proofs?: ProofHistoryItem[];
-}
+  useEffect(() => {
+    loadProofs();
+  }, []);
 
-export function ProofsHistoryCard({ proofs = [] }: ProofsHistoryCardProps) {
+  const loadProofs = () => {
+    setIsLoading(true);
+    try {
+      const storedProofs = ProofStorage.getProofs();
+      setProofs(storedProofs);
+    } catch (error) {
+      console.error('[ProofsHistoryCard] Failed to load proofs:', error);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
   const getProofIcon = (type: string) => {
     const icons = {
       age: '🎂',
@@ -31,11 +38,12 @@ export function ProofsHistoryCard({ proofs = [] }: ProofsHistoryCardProps) {
     return icons[type as keyof typeof icons] || '📄';
   };
 
-  const getStatusBadge = (status: ProofHistoryItem['status']) => {
+  const getStatusBadge = (status: StoredProof['status']) => {
     const styles = {
       pending: 'bg-yellow-100 text-yellow-700',
       verified: 'bg-green-100 text-green-700',
       failed: 'bg-red-100 text-red-700',
+      expired: 'bg-gray-100 text-gray-700',
     };
     return (
       <span className={`px-2 py-1 rounded-full text-xs font-medium ${styles[status]}`}>
@@ -43,6 +51,21 @@ export function ProofsHistoryCard({ proofs = [] }: ProofsHistoryCardProps) {
       </span>
     );
   };
+
+  if (isLoading) {
+    return (
+      <div className="bg-white rounded-xl shadow-lg p-6">
+        <div className="animate-pulse">
+          <div className="h-8 bg-gray-200 rounded w-1/3 mb-6"></div>
+          <div className="space-y-3">
+            {[1, 2, 3].map((i) => (
+              <div key={i} className="h-20 bg-gray-200 rounded"></div>
+            ))}
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="bg-white rounded-xl shadow-lg p-6">
@@ -53,15 +76,15 @@ export function ProofsHistoryCard({ proofs = [] }: ProofsHistoryCardProps) {
 
       {proofs.length === 0 ? (
         <div className="text-center py-12">
-          <div className="text-6xl mb-4">🔐</div>
-          <p className="text-gray-500 mb-2">No proofs generated yet</p>
-          <p className="text-sm text-gray-400">
-            Generate your first zero-knowledge proof from your credentials
+          <div className="text-6xl mb-4">�</div>
+          <p className="text-gray-600 mb-2">No proofs generated yet</p>
+          <p className="text-sm text-gray-500">
+            Generate your first zero-knowledge proof to get started!
           </p>
         </div>
       ) : (
         <div className="space-y-3">
-          {proofs.map(proof => (
+          {proofs.map((proof) => (
             <div
               key={proof.id}
               className="border border-gray-200 rounded-lg p-4 hover:border-indigo-300 hover:bg-gray-50 transition-all"
@@ -79,12 +102,12 @@ export function ProofsHistoryCard({ proofs = [] }: ProofsHistoryCardProps) {
                     </div>
                     
                     <p className="text-sm text-gray-600">
-                      Generated {new Date(proof.createdAt).toLocaleString()}
+                      Generated {new Date(proof.timestamp).toLocaleString()}
                     </p>
                     
-                    {proof.verifier && (
+                    {proof.metadata.verifierAddress && (
                       <p className="text-xs text-gray-500 mt-1">
-                        Verifier: {proof.verifier.substring(0, 20)}...
+                        Verifier: {proof.metadata.verifierAddress.substring(0, 20)}...
                       </p>
                     )}
                   </div>
