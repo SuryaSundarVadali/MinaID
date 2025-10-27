@@ -1,10 +1,10 @@
-import { Dashboard } from '../../components/Dashboard';
+import { EnhancedDashboard } from '../../components/EnhancedDashboard';
 import { ProtectedRoute } from '../../components/auth/ProtectedRoute';
 
 export default function DashboardPage() {
   return (
     <ProtectedRoute>
-      <Dashboard />
+      <EnhancedDashboard />
     </ProtectedRoute>
   );
 }
