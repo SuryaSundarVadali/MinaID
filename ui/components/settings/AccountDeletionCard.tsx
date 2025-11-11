@@ -11,6 +11,8 @@ import React, { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import type { WalletSession } from '../../context/WalletContext';
 import { useWallet } from '../../context/WalletContext';
+import { rateLimiter, RateLimitConfigs, formatTimeRemaining } from '../../lib/RateLimiter';
+import { logSecurityEvent } from '../../lib/SecurityUtils';
 
 interface AccountDeletionCardProps {
   session: WalletSession;
@@ -44,11 +46,25 @@ export function AccountDeletionCard({ session }: AccountDeletionCardProps) {
   };
 
   const handleAuthenticateAndDelete = async () => {
+    // Rate limiting check
+    const rateLimitKey = `account_deletion:${session.did}`;
+    if (!rateLimiter.isAllowed(rateLimitKey, RateLimitConfigs.ACCOUNT_DELETION)) {
+      const timeRemaining = rateLimiter.getTimeUntilUnblocked(rateLimitKey);
+      setDeletionError(
+        `Too many deletion attempts. Please try again in ${formatTimeRemaining(timeRemaining)}.`
+      );
+      setDeletionStep('warning');
+      return;
+    }
+
     setDeletionStep('deleting');
     setDeletionProgress(0);
     setDeletionError(null);
 
     try {
+      // Log deletion start
+      logSecurityEvent('account_deletion_started', { did: session.did }, 'warning');
+
       // Step 1: Authenticate with passkey
       setDeletionProgress(10);
       await new Promise(resolve => setTimeout(resolve, 500));
@@ -95,11 +111,21 @@ export function AccountDeletionCard({ session }: AccountDeletionCardProps) {
       // Complete
       setDeletionProgress(100);
       setDeletionStep('complete');
+      
+      // Log successful deletion
+      logSecurityEvent('account_deletion_success', { did: session.did }, 'info');
 
     } catch (error: any) {
       console.error('[AccountDeletion] Failed:', error);
       setDeletionError(error.message || 'Account deletion failed');
       setDeletionStep('warning');
+      
+      // Log failed deletion
+      logSecurityEvent(
+        'account_deletion_failed',
+        { did: session.did, error: error.message },
+        'error'
+      );
     }
   };
 

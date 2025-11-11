@@ -26,6 +26,8 @@ import { usePasskey } from '../hooks/usePasskey';
 import { parseAadharXML, validateAadharFile, type AadharData } from '../lib/AadharParser';
 import { ContractInterface, createNetworkConfig } from '../lib/ContractInterface';
 import { sha256Hash } from '../lib/CryptoUtils';
+import GradientBG from './GradientBG';
+import styles from '../styles/Home.module.css';
 
 // Types
 type SignupStep = 
@@ -298,45 +300,62 @@ export function SignupOrchestrator({ onSuccess }: SignupOrchestratorProps = {}) 
     switch (state.step) {
       case 'welcome':
         return (
-          <div className="text-center space-y-6">
-            <h1 className="text-4xl font-bold">Welcome to MinaID</h1>
-            <p className="text-lg text-gray-600">
-              Create your decentralized identity with biometric security
+          <div className={styles.center}>
+            <h1 style={{ fontSize: '2.5rem', marginBottom: '1rem', mixBlendMode: 'difference', filter: 'invert(0.7)' }}>
+              Welcome to MinaID
+            </h1>
+            <p className={styles.tagline} style={{ marginBottom: '2rem' }}>
+              CREATE YOUR DECENTRALIZED IDENTITY WITH BIOMETRIC SECURITY
             </p>
             <button
               onClick={() => setState(prev => ({ ...prev, step: 'connect-wallet' }))}
-              className="px-8 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition"
+              className={styles.card}
+              style={{ margin: '2rem auto' }}
             >
-              Get Started
+              <h2>
+                <span>Get Started</span>
+                <span>→</span>
+              </h2>
+              <p>Begin your journey to sovereign digital identity</p>
             </button>
           </div>
         );
 
       case 'connect-wallet':
         return (
-          <div className="space-y-6">
-            <h2 className="text-2xl font-bold">Step 1: Connect Your Wallet</h2>
-            <p className="text-gray-600">
-              Choose a wallet to create your MinaID
-            </p>
+          <div>
+            <div className={styles.center}>
+              <h2 style={{ fontSize: '2rem', marginBottom: '1rem', mixBlendMode: 'difference', filter: 'invert(0.7)' }}>
+                Step 1: Connect Your Wallet
+              </h2>
+              <p style={{ marginBottom: '2rem', mixBlendMode: 'difference', filter: 'invert(0.7)' }}>
+                Choose a wallet to create your MinaID
+              </p>
+            </div>
             
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div className={styles.grid}>
               <button
                 onClick={handleConnectAuro}
                 disabled={state.loading}
-                className="p-6 border-2 border-blue-500 rounded-lg hover:bg-blue-50 transition disabled:opacity-50"
+                className={styles.card}
               >
-                <h3 className="font-bold text-lg mb-2">Auro Wallet</h3>
-                <p className="text-sm text-gray-600">Mina Protocol Native</p>
+                <h2>
+                  <span>Auro Wallet</span>
+                  <span>→</span>
+                </h2>
+                <p>Mina Protocol Native</p>
               </button>
 
               <button
                 onClick={handleConnectMetamask}
                 disabled={state.loading}
-                className="p-6 border-2 border-orange-500 rounded-lg hover:bg-orange-50 transition disabled:opacity-50"
+                className={styles.card}
               >
-                <h3 className="font-bold text-lg mb-2">Metamask</h3>
-                <p className="text-sm text-gray-600">Ethereum & EVM Chains</p>
+                <h2>
+                  <span>Metamask</span>
+                  <span>→</span>
+                </h2>
+                <p>Ethereum & EVM Chains</p>
               </button>
             </div>
           </div>
@@ -344,135 +363,221 @@ export function SignupOrchestrator({ onSuccess }: SignupOrchestratorProps = {}) 
 
       case 'upload-aadhar':
         return (
-          <div className="space-y-6">
-            <h2 className="text-2xl font-bold">Step 2: Upload Aadhar XML</h2>
-            <p className="text-gray-600">
-              Upload your eAadhaar XML file for KYC verification
-            </p>
-
-            <div className="border-2 border-dashed border-gray-300 rounded-lg p-8 text-center">
-              <input
-                type="file"
-                accept=".xml"
-                onChange={handleFileSelect}
-                className="hidden"
-                id="aadhar-upload"
-              />
-              <label
-                htmlFor="aadhar-upload"
-                className="cursor-pointer inline-block px-6 py-3 bg-gray-100 rounded-lg hover:bg-gray-200 transition"
-              >
-                {selectedFile ? selectedFile.name : 'Choose Aadhar XML File'}
-              </label>
-              
-              <p className="mt-4 text-sm text-gray-500">
-                Your Aadhar data stays on your device. We never send it to any server.
+          <div>
+            <div className={styles.center}>
+              <h2 style={{ fontSize: '2rem', marginBottom: '1rem', mixBlendMode: 'difference', filter: 'invert(0.7)' }}>
+                Step 2: Upload Aadhar XML
+              </h2>
+              <p style={{ marginBottom: '2rem', mixBlendMode: 'difference', filter: 'invert(0.7)' }}>
+                Upload your eAadhaar XML file for KYC verification
               </p>
             </div>
 
-            {selectedFile && (
-              <button
-                onClick={handleParseAadhar}
-                disabled={state.loading}
-                className="w-full px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition disabled:opacity-50"
-              >
-                {state.loading ? 'Parsing...' : 'Continue'}
-              </button>
-            )}
+            <div className={styles.stateContainer}>
+              <div className={styles.state} style={{ maxWidth: '600px', margin: '0 auto' }}>
+                <input
+                  type="file"
+                  accept=".xml"
+                  onChange={handleFileSelect}
+                  className="hidden"
+                  id="aadhar-upload"
+                  style={{ display: 'none' }}
+                />
+                <label
+                  htmlFor="aadhar-upload"
+                  style={{ cursor: 'pointer' }}
+                >
+                  <button
+                    type="button"
+                    style={{ 
+                      width: '100%',
+                      whiteSpace: 'normal',
+                      wordWrap: 'break-word',
+                      padding: '0.75rem',
+                      lineHeight: '1.4'
+                    }}
+                  >
+                    {selectedFile ? selectedFile.name : 'Choose Aadhar XML File'}
+                  </button>
+                </label>
+                
+                <p style={{ 
+                  marginTop: '1rem', 
+                  fontSize: '0.875rem',
+                  lineHeight: '1.4',
+                  textAlign: 'center'
+                }}>
+                  🔒 Your Aadhar data stays on your device.<br />
+                  We never send it to any server.
+                </p>
+
+                {selectedFile && (
+                  <button
+                    onClick={handleParseAadhar}
+                    disabled={state.loading}
+                    style={{ marginTop: '1rem', width: '100%' }}
+                  >
+                    {state.loading ? 'Parsing...' : 'Continue'}
+                  </button>
+                )}
+              </div>
+            </div>
           </div>
         );
 
       case 'create-passkey':
         return (
-          <div className="space-y-6">
-            <h2 className="text-2xl font-bold">Step 3: Create Biometric Passkey</h2>
-            <p className="text-gray-600">
-              Secure your identity with Face ID, Touch ID, or fingerprint
-            </p>
-
-            <div className="bg-blue-50 border border-blue-200 rounded-lg p-6">
-              <h3 className="font-bold mb-2">🔐 Why Passkeys?</h3>
-              <ul className="text-sm space-y-2 text-gray-700">
-                <li>✓ Your private key is encrypted with your biometric</li>
-                <li>✓ Only you can generate proofs - credential sharing impossible</li>
-                <li>✓ Device-bound security - cannot be phished or stolen</li>
-              </ul>
+          <div>
+            <div className={styles.center}>
+              <h2 style={{ fontSize: '2rem', marginBottom: '1rem', mixBlendMode: 'difference', filter: 'invert(0.7)' }}>
+                Step 3: Create Biometric Passkey
+              </h2>
+              <p style={{ marginBottom: '2rem', mixBlendMode: 'difference', filter: 'invert(0.7)' }}>
+                Secure your identity with Face ID, Touch ID, or fingerprint
+              </p>
             </div>
 
-            {state.aadharData && (
-              <div className="bg-gray-50 rounded-lg p-4">
-                <p className="text-sm text-gray-600">Creating Passkey for:</p>
-                <p className="font-bold">{state.aadharData.name}</p>
+            <div className={styles.stateContainer}>
+              <div className={styles.state} style={{ maxWidth: '600px', margin: '0 auto' }}>
+                <h3 className={styles.bold} style={{ marginBottom: '0.75rem' }}>🔐 Why Passkeys?</h3>
+                <p style={{ fontSize: '0.875rem', marginBottom: '0.5rem', lineHeight: '1.4' }}>
+                  ✓ Your private key is encrypted with your biometric
+                </p>
+                <p style={{ fontSize: '0.875rem', marginBottom: '0.5rem', lineHeight: '1.4' }}>
+                  ✓ Only you can generate proofs - credential sharing impossible
+                </p>
+                <p style={{ fontSize: '0.875rem', marginBottom: '1rem', lineHeight: '1.4' }}>
+                  ✓ Device-bound security - cannot be phished or stolen
+                </p>
+                
+                {state.aadharData && (
+                  <div style={{ 
+                    marginTop: '1rem', 
+                    padding: '0.75rem', 
+                    backgroundColor: 'rgba(255,255,255,0.1)',
+                    borderRadius: '4px'
+                  }}>
+                    <p style={{ fontSize: '0.875rem', marginBottom: '0.25rem' }}>Creating Passkey for:</p>
+                    <p className={styles.bold}>{state.aadharData.name}</p>
+                  </div>
+                )}
+
+                <button
+                  onClick={handleCreatePasskey}
+                  disabled={state.loading || !isPasskeySupported}
+                  style={{ marginTop: '1rem', width: '100%' }}
+                >
+                  {state.loading ? 'Creating Passkey...' : 'Create Passkey'}
+                </button>
+
+                {!isPasskeySupported && (
+                  <p 
+                    className={styles.error} 
+                    style={{ 
+                      fontSize: '0.875rem', 
+                      textAlign: 'center', 
+                      marginTop: '1rem',
+                      lineHeight: '1.4'
+                    }}
+                  >
+                    Passkeys not supported in this browser.<br />
+                    Use Chrome, Safari, or Edge.
+                  </p>
+                )}
               </div>
-            )}
-
-            <button
-              onClick={handleCreatePasskey}
-              disabled={state.loading || !isPasskeySupported}
-              className="w-full px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition disabled:opacity-50"
-            >
-              {state.loading ? 'Creating Passkey...' : 'Create Passkey'}
-            </button>
-
-            {!isPasskeySupported && (
-              <p className="text-red-500 text-sm text-center">
-                Passkeys not supported in this browser. Please use Chrome, Safari, or Edge.
-              </p>
-            )}
+            </div>
           </div>
         );
 
       case 'register-did':
         return (
-          <div className="space-y-6">
-            <h2 className="text-2xl font-bold">Step 4: Register Your DID</h2>
-            <p className="text-gray-600">
-              Register your decentralized identifier on Mina blockchain
-            </p>
-
-            <div className="bg-gray-50 rounded-lg p-4 space-y-2">
-              <div>
-                <p className="text-sm text-gray-600">Your DID:</p>
-                <p className="font-mono text-sm break-all">{state.did}</p>
-              </div>
-              <div>
-                <p className="text-sm text-gray-600">Name:</p>
-                <p className="font-bold">{state.aadharData?.name}</p>
-              </div>
-            </div>
-
-            <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4">
-              <p className="text-sm text-gray-700">
-                ⚠️ This will create a transaction on Mina blockchain. Make sure you have enough MINA for gas fees.
+          <div>
+            <div className={styles.center}>
+              <h2 style={{ fontSize: '2rem', marginBottom: '1rem', mixBlendMode: 'difference', filter: 'invert(0.7)' }}>
+                Step 4: Register Your DID
+              </h2>
+              <p style={{ marginBottom: '2rem', mixBlendMode: 'difference', filter: 'invert(0.7)' }}>
+                Register your decentralized identifier on Mina blockchain
               </p>
             </div>
 
-            <button
-              onClick={handleRegisterDID}
-              disabled={state.loading}
-              className="w-full px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition disabled:opacity-50"
-            >
-              {state.loading ? 'Registering...' : 'Register DID'}
-            </button>
+            <div className={styles.stateContainer}>
+              <div className={styles.state} style={{ maxWidth: '600px', margin: '0 auto' }}>
+                <div style={{ marginBottom: '1rem', wordWrap: 'break-word', overflowWrap: 'break-word' }}>
+                  <p style={{ fontSize: '0.875rem', marginBottom: '0.5rem' }}>Your DID:</p>
+                  <p 
+                    className={styles.code} 
+                    style={{ 
+                      fontSize: '0.625rem', 
+                      wordBreak: 'break-all',
+                      overflowWrap: 'anywhere',
+                      lineHeight: '1.2',
+                      padding: '0.5rem',
+                      backgroundColor: 'rgba(0,0,0,0.05)',
+                      borderRadius: '4px'
+                    }}
+                  >
+                    {state.did}
+                  </p>
+                </div>
+                <div style={{ marginBottom: '1rem' }}>
+                  <p style={{ fontSize: '0.875rem', marginBottom: '0.5rem' }}>Name:</p>
+                  <p className={styles.bold}>{state.aadharData?.name}</p>
+                </div>
+
+                <div style={{ 
+                  fontSize: '0.875rem', 
+                  marginTop: '1rem', 
+                  marginBottom: '1rem',
+                  padding: '0.75rem',
+                  backgroundColor: 'rgba(255, 193, 7, 0.1)',
+                  border: '1px solid rgba(255, 193, 7, 0.3)',
+                  borderRadius: '4px',
+                  lineHeight: '1.4'
+                }}>
+                  <p style={{ margin: 0 }}>
+                    ⚠️ <strong>Important:</strong> Your account needs MINA tokens to register on-chain.
+                  </p>
+                  <p style={{ margin: '0.5rem 0 0 0', fontSize: '0.75rem' }}>
+                    Get free testnet tokens from: <a 
+                      href="https://faucet.minaprotocol.com/" 
+                      target="_blank" 
+                      rel="noopener noreferrer"
+                      style={{ color: '#0066cc', textDecoration: 'underline' }}
+                    >
+                      faucet.minaprotocol.com
+                    </a>
+                  </p>
+                </div>
+
+                <button
+                  onClick={handleRegisterDID}
+                  disabled={state.loading}
+                  style={{ marginTop: '1rem', width: '100%' }}
+                >
+                  {state.loading ? 'Registering...' : 'Register DID'}
+                </button>
+              </div>
+            </div>
           </div>
         );
 
       case 'complete':
         return (
-          <div className="text-center space-y-6">
-            <div className="text-6xl">🎉</div>
-            <h2 className="text-3xl font-bold">Welcome to MinaID!</h2>
-            <p className="text-lg text-gray-600">
+          <div className={styles.center}>
+            <div style={{ fontSize: '5rem', marginBottom: '1rem' }}>🎉</div>
+            <h2 style={{ fontSize: '2.5rem', marginBottom: '1rem', mixBlendMode: 'difference', filter: 'invert(0.7)' }}>
+              Welcome to MinaID!
+            </h2>
+            <p style={{ fontSize: '1.25rem', marginBottom: '2rem', mixBlendMode: 'difference', filter: 'invert(0.7)' }}>
               Your decentralized identity is ready
             </p>
 
-            <div className="bg-green-50 border border-green-200 rounded-lg p-6 text-left">
-              <h3 className="font-bold mb-2">What's Next?</h3>
-              <ul className="space-y-2 text-sm text-gray-700">
-                <li>✓ Use your Passkey to login securely</li>
-                <li>✓ Generate zero-knowledge proofs of your credentials</li>
-                <li>✓ Verify your identity anywhere without revealing data</li>
-              </ul>
+            <div className={styles.state} style={{ marginBottom: '2rem' }}>
+              <h3 className={styles.bold}>What's Next?</h3>
+              <p style={{ fontSize: '0.875rem' }}>✓ Use your Passkey to login securely</p>
+              <p style={{ fontSize: '0.875rem' }}>✓ Generate zero-knowledge proofs of your credentials</p>
+              <p style={{ fontSize: '0.875rem' }}>✓ Verify your identity anywhere without revealing data</p>
             </div>
 
             <button
@@ -483,9 +588,13 @@ export function SignupOrchestrator({ onSuccess }: SignupOrchestratorProps = {}) 
                   window.location.href = '/dashboard';
                 }
               }}
-              className="px-8 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition"
+              className={styles.card}
             >
-              Go to Dashboard
+              <h2>
+                <span>Go to Dashboard</span>
+                <span>→</span>
+              </h2>
+              <p>Start using your MinaID</p>
             </button>
           </div>
         );
@@ -496,38 +605,62 @@ export function SignupOrchestrator({ onSuccess }: SignupOrchestratorProps = {}) 
   };
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100 flex items-center justify-center p-4">
-      <div className="max-w-2xl w-full bg-white rounded-2xl shadow-xl p-8">
+    <GradientBG>
+      <div className={styles.main}>
         {/* Progress Indicator */}
-        <div className="mb-8">
-          <div className="flex justify-between items-center mb-2">
+        <div style={{ width: '100%', maxWidth: '800px', marginBottom: '2rem', mixBlendMode: 'difference', filter: 'invert(0.7)' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.5rem' }}>
             {['welcome', 'connect-wallet', 'upload-aadhar', 'create-passkey', 'register-did', 'complete'].map((step, index) => (
               <div
                 key={step}
-                className={`h-2 flex-1 mx-1 rounded ${
-                  ['welcome', 'connect-wallet', 'upload-aadhar', 'create-passkey', 'register-did', 'complete'].indexOf(state.step) >= index
-                    ? 'bg-blue-600'
-                    : 'bg-gray-200'
-                }`}
+                style={{
+                  height: '8px',
+                  flex: 1,
+                  margin: '0 4px',
+                  borderRadius: '4px',
+                  backgroundColor: ['welcome', 'connect-wallet', 'upload-aadhar', 'create-passkey', 'register-did', 'complete'].indexOf(state.step) >= index
+                    ? '#2d2d2d'
+                    : 'rgba(255, 255, 255, 0.3)'
+                }}
               />
             ))}
           </div>
-          <p className="text-xs text-gray-500 text-center mt-2">
+          <p style={{ fontSize: '0.75rem', textAlign: 'center', marginTop: '0.5rem' }}>
             Step {['welcome', 'connect-wallet', 'upload-aadhar', 'create-passkey', 'register-did', 'complete'].indexOf(state.step) + 1} of 6
           </p>
         </div>
 
         {/* Error Display */}
         {state.error && (
-          <div className="mb-6 p-4 bg-red-50 border border-red-200 rounded-lg text-red-700">
-            <p className="font-bold">Error</p>
-            <p className="text-sm">{state.error}</p>
+          <div 
+            className={styles.state} 
+            style={{ 
+              maxWidth: '600px', 
+              margin: '0 auto 2rem',
+              backgroundColor: 'rgba(255, 255, 255, 0.95)',
+              border: '2px solid #dc3545',
+              padding: '1rem'
+            }}
+          >
+            <p className={`${styles.bold} ${styles.error}`} style={{ marginBottom: '0.5rem' }}>
+              Error
+            </p>
+            <p style={{ 
+              fontSize: '0.875rem', 
+              wordWrap: 'break-word', 
+              overflowWrap: 'break-word',
+              lineHeight: '1.4'
+            }}>
+              {state.error}
+            </p>
           </div>
         )}
 
         {/* Current Step Content */}
-        {renderStep()}
+        <div style={{ width: '100%', maxWidth: '800px' }}>
+          {renderStep()}
+        </div>
       </div>
-    </div>
+    </GradientBG>
   );
 }

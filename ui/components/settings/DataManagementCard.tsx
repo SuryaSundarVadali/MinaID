@@ -9,6 +9,8 @@
 import React, { useState } from 'react';
 import type { WalletSession } from '../../context/WalletContext';
 import { ProofStorage } from '../../lib/ProofStorage';
+import { rateLimiter, RateLimitConfigs, formatTimeRemaining } from '../../lib/RateLimiter';
+import { logSecurityEvent } from '../../lib/SecurityUtils';
 
 interface DataManagementCardProps {
   session: WalletSession;
@@ -18,8 +20,20 @@ export function DataManagementCard({ session }: DataManagementCardProps) {
   const [isExporting, setIsExporting] = useState(false);
 
   const handleExportData = async () => {
+    // Rate limiting check
+    const rateLimitKey = `data_export:${session.did}`;
+    if (!rateLimiter.isAllowed(rateLimitKey, RateLimitConfigs.DATA_EXPORT)) {
+      const timeRemaining = rateLimiter.getTimeUntilUnblocked(rateLimitKey);
+      alert(`Too many export attempts. Please try again in ${formatTimeRemaining(timeRemaining)}.`);
+      return;
+    }
+
     setIsExporting(true);
+    
     try {
+      // Log export start
+      logSecurityEvent('data_export_started', { did: session.did }, 'info');
+
       // Collect all user data
       const userData = {
         did: session.did,
@@ -31,8 +45,11 @@ export function DataManagementCard({ session }: DataManagementCardProps) {
         exportDate: new Date().toISOString(),
       };
 
-      // Create downloadable file
+      // Calculate data size for logging
       const dataStr = JSON.stringify(userData, null, 2);
+      const dataSizeKB = (new Blob([dataStr]).size / 1024).toFixed(2);
+
+      // Create downloadable file
       const dataBlob = new Blob([dataStr], { type: 'application/json' });
       const url = URL.createObjectURL(dataBlob);
       
@@ -44,9 +61,24 @@ export function DataManagementCard({ session }: DataManagementCardProps) {
       document.body.removeChild(link);
       URL.revokeObjectURL(url);
 
+      // Log successful export
+      logSecurityEvent(
+        'data_export_success',
+        { did: session.did, dataSizeKB },
+        'info'
+      );
+
       alert('Data exported successfully!');
-    } catch (error) {
+    } catch (error: any) {
       console.error('[DataManagement] Export failed:', error);
+      
+      // Log failed export
+      logSecurityEvent(
+        'data_export_failed',
+        { did: session.did, error: error.message },
+        'error'
+      );
+      
       alert('Failed to export data. Please try again.');
     } finally {
       setIsExporting(false);

@@ -7,8 +7,6 @@ import {
   PublicKey,
   Bool,
   Poseidon,
-  Circuit,
-  Provable,
   Struct,
 } from 'o1js';
 
@@ -124,17 +122,13 @@ export class ZKPVerifier extends SmartContract {
    * @param ageHash - Hash of the actual age (kept private)
    * @param proof - ZK proof that age > minimumAge
    * @param issuerPublicKey - Public key of the credential issuer
-   * @param issuerSignatureR - Signature component R from issuer
-   * @param issuerSignatureS - Signature component S from issuer
    */
   @method
   async verifyAgeProof(
     subject: PublicKey,
     ageHash: Field,
     proof: Field,
-    issuerPublicKey: PublicKey,
-    issuerSignatureR: Field,
-    issuerSignatureS: Field
+    issuerPublicKey: PublicKey
   ) {
     // Get minimum age requirement
     const minAge = this.minimumAge.getAndRequireEquals();

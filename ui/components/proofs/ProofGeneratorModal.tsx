@@ -13,6 +13,9 @@ import { PrivateKey } from 'o1js';
 import { generateAgeProof } from '../../lib/ProofGenerator';
 import { ProofStorage } from '../../lib/ProofStorage';
 import type { AadharData } from '../../lib/AadharParser';
+import { rateLimiter, RateLimitConfigs, formatTimeRemaining } from '../../lib/RateLimiter';
+import { validateAge, validateCredentialData } from '../../lib/InputValidator';
+import { logSecurityEvent } from '../../lib/SecurityUtils';
 
 type ProofType = 'age' | 'kyc' | 'composite';
 
@@ -62,6 +65,26 @@ export function ProofGeneratorModal({
       return;
     }
 
+    // Rate limiting check
+    const rateLimitKey = `proof_gen:${session.did}`;
+    if (!rateLimiter.isAllowed(rateLimitKey, RateLimitConfigs.PROOF_GENERATION)) {
+      const timeRemaining = rateLimiter.getTimeUntilUnblocked(rateLimitKey);
+      setState(prev => ({ 
+        ...prev, 
+        error: `Rate limit exceeded. Please try again in ${formatTimeRemaining(timeRemaining)}.` 
+      }));
+      return;
+    }
+
+    // Validate age input
+    if (state.proofType === 'age' && state.config.minimumAge) {
+      const ageValidation = validateAge(state.config.minimumAge);
+      if (!ageValidation.valid) {
+        setState(prev => ({ ...prev, error: ageValidation.error }));
+        return;
+      }
+    }
+
     setState(prev => ({ ...prev, step: 'generating', progress: 10 }));
 
     try {
@@ -76,6 +99,12 @@ export function ProofGeneratorModal({
       
       if (!credentialData) {
         throw new Error('Failed to load credential data');
+      }
+
+      // Validate credential data
+      const credentialValidation = validateCredentialData(credentialData);
+      if (!credentialValidation.valid) {
+        throw new Error(`Invalid credential data: ${credentialValidation.error}`);
       }
 
       // Step 3: Generate ZK proof based on type
@@ -111,6 +140,12 @@ export function ProofGeneratorModal({
       // Step 4: Save proof locally
       await saveProofToStorage(proof, session.did);
 
+      // Log successful proof generation
+      logSecurityEvent('proof_generated', { 
+        proofType: state.proofType, 
+        proofId: proof.id 
+      }, 'info');
+
       setState(prev => ({
         ...prev,
         step: 'success',
@@ -124,6 +159,13 @@ export function ProofGeneratorModal({
 
     } catch (error: any) {
       console.error('[ProofGenerator] Failed:', error);
+      
+      // Log failed proof generation
+      logSecurityEvent('proof_generation_failed', { 
+        proofType: state.proofType,
+        error: error.message 
+      }, 'error');
+      
       setState(prev => ({
         ...prev,
         step: 'error',

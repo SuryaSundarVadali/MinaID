@@ -8,6 +8,9 @@
 
 import React, { useState } from 'react';
 import type { VerificationResult } from '../VerifierDashboard';
+import { rateLimiter, RateLimitConfigs, formatTimeRemaining } from '../../lib/RateLimiter';
+import { validateJSON, validateProofData, containsSuspiciousPatterns } from '../../lib/InputValidator';
+import { logSecurityEvent } from '../../lib/SecurityUtils';
 
 interface ProofScannerCardProps {
   onVerificationComplete?: (result: VerificationResult) => void;
@@ -22,6 +25,21 @@ export function ProofScannerCard({ onVerificationComplete }: ProofScannerCardPro
   const handleVerifyProof = async () => {
     if (!proofInput.trim()) {
       alert('Please enter a proof to verify');
+      return;
+    }
+
+    // Rate limiting check
+    const rateLimitKey = 'proof_verification:verifier';
+    if (!rateLimiter.isAllowed(rateLimitKey, RateLimitConfigs.PROOF_VERIFICATION)) {
+      const timeRemaining = rateLimiter.getTimeUntilUnblocked(rateLimitKey);
+      alert(`Rate limit exceeded. Please try again in ${formatTimeRemaining(timeRemaining)}.`);
+      return;
+    }
+
+    // Check for suspicious patterns (XSS attempt)
+    if (containsSuspiciousPatterns(proofInput)) {
+      logSecurityEvent('proof_verification_blocked', { reason: 'suspicious_input' }, 'warning');
+      alert('Invalid proof: suspicious content detected');
       return;
     }
 
@@ -40,8 +58,16 @@ export function ProofScannerCard({ onVerificationComplete }: ProofScannerCardPro
           const decoded = atob(proofInput);
           proofData = JSON.parse(decoded);
         } catch {
+          logSecurityEvent('proof_verification_failed', { error: 'invalid_format' }, 'warning');
           throw new Error('Invalid proof format. Please enter valid JSON or base64-encoded proof.');
         }
+      }
+
+      // Validate proof structure
+      const validation = validateProofData(proofData);
+      if (!validation.valid) {
+        logSecurityEvent('proof_verification_failed', { error: validation.error }, 'warning');
+        throw new Error(`Invalid proof structure: ${validation.error}`);
       }
 
       console.log('[ProofScanner] Verifying proof:', proofData);
@@ -66,12 +92,26 @@ export function ProofScannerCard({ onVerificationComplete }: ProofScannerCardPro
 
       setVerificationResult(result);
 
+      // Log successful verification
+      logSecurityEvent(
+        'proof_verified',
+        { proofId: result.proofId, proofType: result.proofType, subjectDID: result.subjectDID },
+        'info'
+      );
+
       if (onVerificationComplete) {
         onVerificationComplete(result);
       }
 
     } catch (error: any) {
       console.error('[ProofScanner] Verification failed:', error);
+      
+      // Log verification failure
+      logSecurityEvent(
+        'proof_verification_failed',
+        { error: error.message },
+        'error'
+      );
       
       const result: VerificationResult = {
         id: `verification_${Date.now()}`,

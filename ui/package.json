@@ -7,6 +7,9 @@
     "build": "next build --no-lint",
     "start": "next start",
     "lint": "next lint",
+    "test": "vitest",
+    "test:ui": "vitest --ui",
+    "test:coverage": "vitest --coverage",
     "ts-watch": "tsc --noEmit --incremental --watch",
     "clear-cache": "npx rimraf public/cache && npx rimraf app/cache.json && echo \"UI Cache cleared successfully!\"",
     "deploy": "next build --no-lint && touch out/.nojekyll && node ./ghp-postbuild && git add -f out && git commit -m \"Deploy gh-pages\" && cd .. && git subtree push --prefix ui/out origin gh-pages"
@@ -25,15 +28,21 @@
     "xmldsigjs": "^2.8.2"
   },
   "devDependencies": {
+    "@testing-library/jest-dom": "^6.9.1",
+    "@testing-library/react": "^16.3.0",
     "@types/node": "^20",
     "@types/qrcode": "^1.5.6",
     "@types/react": "^18",
     "@types/react-dom": "^18",
+    "@vitejs/plugin-react": "^5.1.0",
+    "@vitest/ui": "^4.0.4",
     "eslint": "^8",
     "eslint-config-next": "14.2.12",
+    "jsdom": "^27.0.1",
     "postcss": "^8",
     "tailwindcss": "^3.4.1",
-    "typescript": "^5"
+    "typescript": "^5",
+    "vitest": "^4.0.4"
   },
   "type": "module"
 }

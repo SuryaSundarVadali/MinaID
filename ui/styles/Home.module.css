@@ -100,8 +100,9 @@
   background-color: rgb(255, 255, 255);
   border: 1px solid #2d2d2d;
   width: 14rem;
-  height: 6rem;
+  min-height: 6rem;
   text-align: center;
+  box-sizing: border-box;
 }
 
 .state .error {
@@ -227,6 +228,20 @@
     flex-direction: column;
   }
 
+  .state {
+    width: 100%;
+    max-width: 90vw;
+    margin: 1rem auto;
+    min-height: auto;
+    height: auto;
+  }
+
+  .state button {
+    width: 100%;
+    max-width: 100%;
+    padding: 0.5rem;
+  }
+
   .start {
     margin-bottom: 2rem;
     padding-left: 0.5rem;
@@ -240,11 +255,21 @@
   .center {
     padding: 0 0 3rem 0.3rem;
   }
+
+  .main {
+    padding: 2rem 1rem;
+  }
 }
 
 /* Tablet and Smaller Desktop */
 @media (min-width: 701px) and (max-width: 1120px) {
   .grid {
     grid-template-columns: repeat(2, 50%);
+  }
+
+  .state {
+    width: 100%;
+    max-width: 500px;
+    margin: 1rem auto;
   }
 }
