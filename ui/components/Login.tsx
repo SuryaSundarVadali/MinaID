@@ -26,7 +26,9 @@ import { useWallet } from '../context/WalletContext';
 import { usePasskey } from '../hooks/usePasskey';
 import { rateLimiter, RateLimitConfigs, formatTimeRemaining } from '../lib/RateLimiter';
 import { logSecurityEvent } from '../lib/SecurityUtils';
+import { hasPasskey, validatePasskeyRequired } from '../lib/DataManagement';
 import GradientBG from './GradientBG';
+import LoadingSpinner from './LoadingSpinner';
 import styles from '../styles/Home.module.css';
 
 interface LoginState {
@@ -77,11 +79,21 @@ export function Login({ onSuccess }: LoginProps = {}) {
         throw new Error('No DID found in Passkey. Please sign up first.');
       }
 
+      // ENFORCE: Validate passkey exists for this DID
+      try {
+        validatePasskeyRequired(authResult.userHandle);
+      } catch (err: any) {
+        throw new Error('Passkey registration required. Please complete signup first.');
+      }
+
       // Login with wallet context (loads session)
       await login(authResult.id);
 
       // Log successful login
-      logSecurityEvent('login_success', { passkeyId: authResult.id }, 'info');
+      logSecurityEvent('login_success', { 
+        passkeyId: authResult.id,
+        did: authResult.userHandle
+      }, 'info');
 
       setState({ loading: false, success: true });
 
@@ -153,8 +165,20 @@ export function Login({ onSuccess }: LoginProps = {}) {
         </div>
 
         <div className={styles.stateContainer}>
+          {/* Loading Indicator */}
+          {state.loading && (
+            <div className={styles.state} style={{ 
+              backgroundColor: 'rgba(255, 255, 255, 0.95)',
+              border: '2px solid #8B5CF6',
+              padding: '2rem',
+              textAlign: 'center'
+            }}>
+              <LoadingSpinner size="medium" message="Authenticating with passkey..." />
+            </div>
+          )}
+
           {/* Success Message */}
-          {state.success && (
+          {state.success && !state.loading && (
             <div className={styles.state}>
               <p className={styles.bold}>Login Successful! ✓</p>
               <p>Redirecting to dashboard...</p>
@@ -162,7 +186,7 @@ export function Login({ onSuccess }: LoginProps = {}) {
           )}
 
           {/* Error Message */}
-          {state.error && (
+          {state.error && !state.loading && (
             <div className={styles.state}>
               <p className={`${styles.bold} ${styles.error}`}>Login Failed</p>
               <p>{state.error}</p>

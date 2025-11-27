@@ -26,7 +26,9 @@ import { usePasskey } from '../hooks/usePasskey';
 import { parseAadharXML, validateAadharFile, type AadharData } from '../lib/AadharParser';
 import { ContractInterface, createNetworkConfig } from '../lib/ContractInterface';
 import { sha256Hash } from '../lib/CryptoUtils';
+import { enforceOnePasskeyPerWallet, countPasskeys } from '../lib/DataManagement';
 import GradientBG from './GradientBG';
+import LoadingSpinner from './LoadingSpinner';
 import styles from '../styles/Home.module.css';
 
 // Types
@@ -46,6 +48,7 @@ interface SignupState {
   did?: string;
   error?: string;
   loading: boolean;
+  loadingMessage?: string;
 }
 
 interface SignupOrchestratorProps {
@@ -69,10 +72,12 @@ export function SignupOrchestrator({ onSuccess }: SignupOrchestratorProps = {}) 
    * Step 1: Connect Wallet
    */
   const handleConnectAuro = async () => {
-    setState(prev => ({ ...prev, loading: true, error: undefined }));
+    setState(prev => ({ ...prev, loading: true, error: undefined, loadingMessage: 'Connecting to Auro Wallet...' }));
 
     try {
       const walletInfo = await connectAuroWallet();
+      
+      setState(prev => ({ ...prev, loadingMessage: 'Generating Mina key pair...' }));
       
       // Generate or import Mina private key
       const privateKey = PrivateKey.random();
@@ -86,12 +91,14 @@ export function SignupOrchestrator({ onSuccess }: SignupOrchestratorProps = {}) 
         walletConnected: true,
         did,
         loading: false,
+        loadingMessage: undefined,
         step: 'upload-aadhar',
       }));
     } catch (error: any) {
       setState(prev => ({
         ...prev,
         loading: false,
+        loadingMessage: undefined,
         error: error.message || 'Failed to connect wallet',
       }));
     }
@@ -149,7 +156,7 @@ export function SignupOrchestrator({ onSuccess }: SignupOrchestratorProps = {}) 
       return;
     }
 
-    setState(prev => ({ ...prev, loading: true, error: undefined }));
+    setState(prev => ({ ...prev, loading: true, error: undefined, loadingMessage: 'Parsing Aadhar XML...' }));
 
     try {
       const result = await parseAadharXML(selectedFile);
@@ -162,12 +169,14 @@ export function SignupOrchestrator({ onSuccess }: SignupOrchestratorProps = {}) 
         ...prev,
         aadharData: result.data,
         loading: false,
+        loadingMessage: undefined,
         step: 'create-passkey',
       }));
     } catch (error: any) {
       setState(prev => ({
         ...prev,
         loading: false,
+        loadingMessage: undefined,
         error: error.message || 'Failed to parse Aadhar XML',
       }));
     }
@@ -187,20 +196,55 @@ export function SignupOrchestrator({ onSuccess }: SignupOrchestratorProps = {}) 
       return;
     }
 
-    setState(prev => ({ ...prev, loading: true, error: undefined }));
+    setState(prev => ({ ...prev, loading: true, error: undefined, loadingMessage: 'Preparing passkey creation...' }));
 
     try {
+      console.log('[Signup] Step 1: Checking existing passkeys...');
+      setState(prev => ({ ...prev, loadingMessage: 'Checking existing passkeys...' }));
+      
+      // ENFORCE: Check if wallet already has a passkey
+      const existingPasskeys = countPasskeys(state.did);
+      if (existingPasskeys > 0) {
+        console.log(`[Signup] Wallet already has ${existingPasskeys} passkey(s). Enforcing one-passkey-per-wallet...`);
+        enforceOnePasskeyPerWallet(state.did);
+      }
+
+      console.log('[Signup] Step 2: Creating new passkey...');
+      setState(prev => ({ ...prev, loadingMessage: 'Waiting for biometric authentication...' }));
+      
       // Create Passkey with biometric authentication
       const passkey = await createPasskey(
         state.did,
         `MinaID - ${state.aadharData?.name || 'User'}`
       );
 
+      console.log('[Signup] ✓ Passkey created:', passkey.id);
+
+      console.log('[Signup] Step 3: Enforcing one-passkey-per-wallet...');
+      setState(prev => ({ ...prev, loadingMessage: 'Enforcing passkey policy...' }));
+      
+      // ENFORCE: Remove any duplicate passkeys created during this session
+      enforceOnePasskeyPerWallet(state.did);
+
+      // Verify only one passkey exists
+      const finalCount = countPasskeys(state.did);
+      console.log(`[Signup] Final passkey count: ${finalCount}`);
+      
+      if (finalCount !== 1) {
+        throw new Error(`Passkey enforcement failed. Expected 1, found ${finalCount}`);
+      }
+
+      console.log('[Signup] Step 4: Storing encrypted private key...');
+      setState(prev => ({ ...prev, loadingMessage: 'Encrypting and storing private key...' }));
+      
       // Encrypt and store private key with Passkey (pass DID since no session exists during signup)
       await storePrivateKey('auro', minaPrivateKey.toBase58(), passkey.id, state.did);
 
       // Clear plaintext private key from memory
       setMinaPrivateKey(null);
+
+      console.log('[Signup] ✓ Private key encrypted and stored');
+      console.log('[Signup] ✓ One-passkey-per-wallet policy enforced');
 
       setState(prev => ({
         ...prev,
@@ -226,9 +270,11 @@ export function SignupOrchestrator({ onSuccess }: SignupOrchestratorProps = {}) 
       return;
     }
 
-    setState(prev => ({ ...prev, loading: true, error: undefined }));
+    setState(prev => ({ ...prev, loading: true, error: undefined, loadingMessage: 'Preparing DID registration...' }));
 
     try {
+      setState(prev => ({ ...prev, loadingMessage: 'Creating DID document...' }));
+      
       // Create DID document hash
       const didDocument = {
         did: state.did,
@@ -238,8 +284,18 @@ export function SignupOrchestrator({ onSuccess }: SignupOrchestratorProps = {}) 
       };
 
       const documentHash = await sha256Hash(JSON.stringify(didDocument));
-      const documentHashField = Field.from(BigInt('0x' + Buffer.from(documentHash, 'base64').toString('hex').substring(0, 32)));
+      
+      setState(prev => ({ ...prev, loadingMessage: 'Processing cryptographic hashes...' }));
+      
+      // Convert base64 hash to hex using browser-compatible method
+      // sha256Hash returns base64, decode it to bytes then convert to hex
+      const { base64ToBytes } = await import('../lib/SecurityUtils');
+      const hashBytes = base64ToBytes(documentHash);
+      const hashHex = Array.from(hashBytes).map(b => b.toString(16).padStart(2, '0')).join('').substring(0, 32);
+      const documentHashField = Field.from(BigInt('0x' + hashHex));
 
+      setState(prev => ({ ...prev, loadingMessage: 'Initializing blockchain connection...' }));
+      
       // Initialize contract interface
       const networkConfig = createNetworkConfig(
         (process.env.NEXT_PUBLIC_NETWORK as any) || 'berkeley'
@@ -653,6 +709,23 @@ export function SignupOrchestrator({ onSuccess }: SignupOrchestratorProps = {}) 
             }}>
               {state.error}
             </p>
+          </div>
+        )}
+
+        {/* Loading Indicator */}
+        {state.loading && (
+          <div
+            style={{
+              maxWidth: '600px',
+              margin: '0 auto 2rem',
+              backgroundColor: 'rgba(255, 255, 255, 0.95)',
+              border: '2px solid #8B5CF6',
+              borderRadius: '8px',
+              padding: '2rem',
+              textAlign: 'center'
+            }}
+          >
+            <LoadingSpinner size="large" message={state.loadingMessage || 'Processing...'} />
           </div>
         )}
 

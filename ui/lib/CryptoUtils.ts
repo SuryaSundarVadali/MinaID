@@ -275,27 +275,88 @@ export function clearAllStorage(did?: string): void {
 // Helper functions for Base64 encoding/decoding
 
 /**
- * Convert ArrayBuffer/Uint8Array to Base64 string
+ * Convert ArrayBuffer/Uint8Array to Base64 string (browser-compatible)
+ * Uses a safe method that works with all byte values
  */
 function bufferToBase64(buffer: Uint8Array | ArrayBuffer): string {
   const bytes = buffer instanceof Uint8Array ? buffer : new Uint8Array(buffer);
-  let binary = '';
-  for (let i = 0; i < bytes.byteLength; i++) {
-    binary += String.fromCharCode(bytes[i]);
+  const base64abc = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
+  let result = '';
+  let i;
+  const l = bytes.length;
+  
+  for (i = 2; i < l; i += 3) {
+    result += base64abc[(bytes[i - 2] >> 2)];
+    result += base64abc[(((bytes[i - 2] & 0x03) << 4) | (bytes[i - 1] >> 4))];
+    result += base64abc[(((bytes[i - 1] & 0x0f) << 2) | (bytes[i] >> 6))];
+    result += base64abc[(bytes[i] & 0x3f)];
   }
-  return btoa(binary);
+  
+  if (i === l + 1) {
+    // 1 byte left
+    result += base64abc[(bytes[i - 2] >> 2)];
+    result += base64abc[((bytes[i - 2] & 0x03) << 4)];
+    result += '==';
+  }
+  
+  if (i === l) {
+    // 2 bytes left
+    result += base64abc[(bytes[i - 2] >> 2)];
+    result += base64abc[(((bytes[i - 2] & 0x03) << 4) | (bytes[i - 1] >> 4))];
+    result += base64abc[((bytes[i - 1] & 0x0f) << 2)];
+    result += '=';
+  }
+  
+  return result;
 }
 
 /**
- * Convert Base64 string to Uint8Array
+ * Validate if a string is valid base64
+ */
+function isValidBase64(str: string): boolean {
+  if (!str || typeof str !== 'string') return false;
+  // Remove whitespace
+  str = str.trim();
+  // Check if string matches base64 pattern
+  const base64Regex = /^[A-Za-z0-9+/]*={0,2}$/;
+  if (!base64Regex.test(str)) return false;
+  // Check length is valid (must be multiple of 4)
+  if (str.length % 4 !== 0) return false;
+  return true;
+}
+
+/**
+ * Convert Base64 string to Uint8Array (browser-compatible)
+ * Uses a safe method that works with all base64 strings
  */
 function base64ToBuffer(base64: string): Uint8Array {
-  const binary = atob(base64);
-  const bytes = new Uint8Array(binary.length);
-  for (let i = 0; i < binary.length; i++) {
-    bytes[i] = binary.charCodeAt(i);
+  if (!isValidBase64(base64)) {
+    throw new Error('Invalid base64 string');
   }
-  return bytes;
+  
+  const base64abc = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
+  const l = base64.length;
+  const placeHolders = base64[l - 2] === '=' ? 2 : base64[l - 1] === '=' ? 1 : 0;
+  const arr = new Uint8Array((l * 3 / 4) - placeHolders);
+  let i = 0;
+  let j = 0;
+  
+  for (i = 0; i < l; i += 4) {
+    const encoded1 = base64abc.indexOf(base64[i]);
+    const encoded2 = base64abc.indexOf(base64[i + 1]);
+    const encoded3 = base64abc.indexOf(base64[i + 2]);
+    const encoded4 = base64abc.indexOf(base64[i + 3]);
+    
+    arr[j++] = (encoded1 << 2) | (encoded2 >> 4);
+    if (encoded3 !== -1) {
+      arr[j++] = ((encoded2 & 15) << 4) | (encoded3 >> 2);
+    }
+    if (encoded4 !== -1) {
+      arr[j++] = ((encoded3 & 3) << 6) | encoded4;
+    }
+  }
+  
+  return arr;
 }
 
 /**

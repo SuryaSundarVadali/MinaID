@@ -80,8 +80,9 @@ export function WalletLogin() {
         // User has existing account - proceed to passkey auth in Login component
         router.push('/login');
       } else {
-        // New user - redirect to signup
-        router.push('/signup');
+        // New user - create basic session and go to dashboard
+        // User will complete profile setup (Aadhar, passkey, DID) from dashboard
+        router.push('/dashboard');
       }
 
       setState({ connecting: false });
@@ -121,7 +122,8 @@ export function WalletLogin() {
       if (hasKey) {
         router.push('/login');
       } else {
-        router.push('/signup');
+        // New user - go to dashboard to complete profile setup
+        router.push('/dashboard');
       }
 
       setState({ connecting: false });
@@ -137,46 +139,46 @@ export function WalletLogin() {
   };
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-indigo-100 via-purple-50 to-pink-100">
-      <div className="max-w-md w-full mx-4">
+    <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-indigo-100 via-purple-50 to-pink-100 p-4">
+      <div className="max-w-md w-full">
         {/* Card */}
-        <div className="bg-white rounded-2xl shadow-xl p-8">
+        <div className="bg-white rounded-2xl shadow-xl p-6 sm:p-8">
           {/* Logo/Title */}
-          <div className="text-center mb-8">
-            <h1 className="text-4xl font-bold text-gray-900 mb-2">MinaID</h1>
-            <p className="text-gray-600">
+          <div className="text-center mb-6 sm:mb-8">
+            <h1 className="text-3xl sm:text-4xl font-bold text-gray-900 mb-2">MinaID</h1>
+            <p className="text-sm sm:text-base text-gray-600">
               Zero-Knowledge Decentralized Identity
             </p>
           </div>
 
           {/* Error Display */}
           {state.error && (
-            <div className="mb-6 p-4 bg-red-50 border border-red-200 rounded-lg">
-              <p className="text-sm text-red-700">{state.error}</p>
+            <div className="mb-4 sm:mb-6 p-3 sm:p-4 bg-red-50 border border-red-200 rounded-lg">
+              <p className="text-xs sm:text-sm text-red-700">{state.error}</p>
             </div>
           )}
 
           {/* Wallet Options */}
-          <div className="space-y-4">
+          <div className="space-y-3 sm:space-y-4">
             {/* Auro Wallet Button */}
             <button
               onClick={handleConnectAuro}
               disabled={state.connecting}
-              className="w-full flex items-center justify-center px-6 py-4 border-2 border-indigo-200 rounded-xl hover:border-indigo-400 hover:bg-indigo-50 transition-all disabled:opacity-50 disabled:cursor-not-allowed group"
+              className="w-full flex items-center justify-center px-4 sm:px-6 py-3 sm:py-4 border-2 border-indigo-200 rounded-xl hover:border-indigo-400 hover:bg-indigo-50 transition-all disabled:opacity-50 disabled:cursor-not-allowed group active:scale-[0.98]"
             >
               <div className="flex items-center space-x-3">
                 {/* Auro Icon Placeholder */}
-                <div className="w-8 h-8 bg-indigo-100 rounded-full flex items-center justify-center">
+                <div className="w-8 h-8 bg-indigo-100 rounded-full flex items-center justify-center flex-shrink-0">
                   <span className="text-indigo-600 font-bold">A</span>
                 </div>
                 
-                <div className="text-left">
-                  <p className="font-semibold text-gray-900 group-hover:text-indigo-600">
+                <div className="text-left min-w-0">
+                  <p className="font-semibold text-gray-900 group-hover:text-indigo-600 text-sm sm:text-base truncate">
                     {state.connecting && state.selectedWallet === 'auro'
                       ? 'Connecting...'
                       : 'Connect with Auro Wallet'}
                   </p>
-                  <p className="text-xs text-gray-500">
+                  <p className="text-xs text-gray-500 truncate">
                     Recommended for Mina Protocol
                   </p>
                 </div>
@@ -187,21 +189,21 @@ export function WalletLogin() {
             <button
               onClick={handleConnectMetaMask}
               disabled={state.connecting}
-              className="w-full flex items-center justify-center px-6 py-4 border-2 border-orange-200 rounded-xl hover:border-orange-400 hover:bg-orange-50 transition-all disabled:opacity-50 disabled:cursor-not-allowed group"
+              className="w-full flex items-center justify-center px-4 sm:px-6 py-3 sm:py-4 border-2 border-orange-200 rounded-xl hover:border-orange-400 hover:bg-orange-50 transition-all disabled:opacity-50 disabled:cursor-not-allowed group active:scale-[0.98]"
             >
               <div className="flex items-center space-x-3">
                 {/* MetaMask Icon Placeholder */}
-                <div className="w-8 h-8 bg-orange-100 rounded-full flex items-center justify-center">
+                <div className="w-8 h-8 bg-orange-100 rounded-full flex items-center justify-center flex-shrink-0">
                   <span className="text-orange-600 font-bold">M</span>
                 </div>
                 
-                <div className="text-left">
-                  <p className="font-semibold text-gray-900 group-hover:text-orange-600">
+                <div className="text-left min-w-0">
+                  <p className="font-semibold text-gray-900 group-hover:text-orange-600 text-sm sm:text-base truncate">
                     {state.connecting && state.selectedWallet === 'metamask'
                       ? 'Connecting...'
                       : 'Connect with MetaMask'}
                   </p>
-                  <p className="text-xs text-gray-500">
+                  <p className="text-xs text-gray-500 truncate">
                     Multi-chain support
                   </p>
                 </div>
@@ -210,8 +212,8 @@ export function WalletLogin() {
           </div>
 
           {/* Info Text */}
-          <div className="mt-8 pt-6 border-t border-gray-200">
-            <p className="text-sm text-gray-600 text-center">
+          <div className="mt-6 sm:mt-8 pt-4 sm:pt-6 border-t border-gray-200">
+            <p className="text-xs sm:text-sm text-gray-600 text-center">
               Don't have an account?{' '}
               <button
                 onClick={() => router.push('/signup')}
@@ -223,8 +225,8 @@ export function WalletLogin() {
           </div>
 
           {/* Security Notice */}
-          <div className="mt-6 p-4 bg-gray-50 rounded-lg">
-            <p className="text-xs text-gray-600 text-center">
+          <div className="mt-4 sm:mt-6 p-3 sm:p-4 bg-gray-50 rounded-lg">
+            <p className="text-xs text-gray-600 text-center leading-relaxed">
               🔒 Your private keys are encrypted and stored locally.
               <br />
               We never have access to your credentials.
@@ -233,8 +235,8 @@ export function WalletLogin() {
         </div>
 
         {/* Help Text */}
-        <div className="mt-6 text-center">
-          <p className="text-sm text-gray-600">
+        <div className="mt-4 sm:mt-6 text-center px-4">
+          <p className="text-xs sm:text-sm text-gray-600">
             Need help?{' '}
             <a
               href="https://docs.minaprotocol.com"

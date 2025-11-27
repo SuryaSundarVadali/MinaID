@@ -120,15 +120,17 @@ export class ZKPVerifier extends SmartContract {
    * 
    * @param subject - Public key of the person whose age is being verified
    * @param ageHash - Hash of the actual age (kept private)
-   * @param proof - ZK proof that age > minimumAge
+   * @param proof - ZK proof that age > minimumAge (commitment from AgeVerificationProgram)
    * @param issuerPublicKey - Public key of the credential issuer
+   * @param timestamp - Timestamp from the proof (for commitment verification)
    */
   @method
   async verifyAgeProof(
     subject: PublicKey,
     ageHash: Field,
     proof: Field,
-    issuerPublicKey: PublicKey
+    issuerPublicKey: PublicKey,
+    timestamp: Field
   ) {
     // Get minimum age requirement
     const minAge = this.minimumAge.getAndRequireEquals();
@@ -138,14 +140,16 @@ export class ZKPVerifier extends SmartContract {
 
     // Verify the proof structure
     // The proof should demonstrate: Hash(age) = ageHash AND age >= minAge
-    // In practice, this would use a ZkProgram, but we'll simulate it here
+    // This matches the commitment calculation in AgeVerificationProgram
     
     // Create commitment hash that should match the proof
+    // This must match exactly what AgeVerificationProgram.proveAgeAboveMinimum produces
     const commitment = Poseidon.hash([
       ageHash,
       minAge,
       ...subject.toFields(),
-      ...issuerPublicKey.toFields()
+      ...issuerPublicKey.toFields(),
+      timestamp,
     ]);
 
     // Verify the proof matches expected commitment

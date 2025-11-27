@@ -1,0 +1,302 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Aadhar XML Parser Test</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 50px auto;
+            padding: 20px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        }
+        .container {
+            background: white;
+            padding: 30px;
+            border-radius: 10px;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.3);
+        }
+        h1 {
+            color: #333;
+            text-align: center;
+        }
+        .upload-area {
+            border: 2px dashed #667eea;
+            padding: 30px;
+            text-align: center;
+            margin: 20px 0;
+            border-radius: 10px;
+            background: #f9f9ff;
+        }
+        input[type="file"] {
+            display: none;
+        }
+        .upload-btn {
+            background: #667eea;
+            color: white;
+            padding: 10px 20px;
+            border-radius: 5px;
+            cursor: pointer;
+            display: inline-block;
+        }
+        .upload-btn:hover {
+            background: #5568d3;
+        }
+        .results {
+            margin-top: 20px;
+            padding: 20px;
+            background: #f5f5f5;
+            border-radius: 5px;
+            display: none;
+        }
+        .results.show {
+            display: block;
+        }
+        .field {
+            margin: 10px 0;
+            padding: 10px;
+            background: white;
+            border-left: 4px solid #667eea;
+        }
+        .field-label {
+            font-weight: bold;
+            color: #667eea;
+        }
+        .field-value {
+            color: #333;
+            margin-top: 5px;
+        }
+        .error {
+            background: #ffe6e6;
+            border-left-color: #ff4444;
+            color: #cc0000;
+        }
+        .success {
+            background: #e6ffe6;
+            border-left-color: #44ff44;
+            color: #009900;
+        }
+        .console-output {
+            background: #1e1e1e;
+            color: #ddd;
+            padding: 15px;
+            border-radius: 5px;
+            font-family: 'Courier New', monospace;
+            font-size: 12px;
+            max-height: 300px;
+            overflow-y: auto;
+            margin-top: 20px;
+        }
+        .console-line {
+            margin: 2px 0;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🔍 Aadhar XML Parser Test</h1>
+        <p style="text-align: center; color: #666;">
+            Upload your Aadhar XML file to test the updated parser
+        </p>
+
+        <div class="upload-area">
+            <label for="xmlFile" class="upload-btn">
+                📁 Select Aadhar XML File
+            </label>
+            <input type="file" id="xmlFile" accept=".xml" />
+            <p id="fileName" style="margin-top: 10px; color: #666;"></p>
+        </div>
+
+        <div id="results" class="results">
+            <h3>Parsing Results</h3>
+            <div id="resultContent"></div>
+            
+            <h3>Console Output</h3>
+            <div id="consoleOutput" class="console-output"></div>
+        </div>
+    </div>
+
+    <script>
+        // Capture console logs
+        const consoleOutput = [];
+        const originalLog = console.log;
+        const originalWarn = console.warn;
+        const originalError = console.error;
+
+        console.log = function(...args) {
+            consoleOutput.push({ type: 'log', message: args.join(' ') });
+            originalLog.apply(console, args);
+            updateConsoleDisplay();
+        };
+
+        console.warn = function(...args) {
+            consoleOutput.push({ type: 'warn', message: args.join(' ') });
+            originalWarn.apply(console, args);
+            updateConsoleDisplay();
+        };
+
+        console.error = function(...args) {
+            consoleOutput.push({ type: 'error', message: args.join(' ') });
+            originalError.apply(console, args);
+            updateConsoleDisplay();
+        };
+
+        function updateConsoleDisplay() {
+            const consoleDiv = document.getElementById('consoleOutput');
+            consoleDiv.innerHTML = consoleOutput.map(entry => {
+                const color = entry.type === 'error' ? '#ff6b6b' : 
+                             entry.type === 'warn' ? '#ffd93d' : '#6bcf7f';
+                return `<div class="console-line" style="color: ${color}">[${entry.type}] ${entry.message}</div>`;
+            }).join('');
+            consoleDiv.scrollTop = consoleDiv.scrollHeight;
+        }
+
+        document.getElementById('xmlFile').addEventListener('change', async (e) => {
+            const file = e.target.files[0];
+            if (!file) return;
+
+            document.getElementById('fileName').textContent = `Selected: ${file.name}`;
+            consoleOutput.length = 0; // Clear console
+            
+            try {
+                console.log('📄 Starting XML parsing...');
+                
+                // Read file as text
+                const xmlText = await file.text();
+                console.log(`✅ File read successfully (${xmlText.length} bytes)`);
+                
+                // Parse XML
+                const parser = new DOMParser();
+                const xmlDoc = parser.parseFromString(xmlText, 'text/xml');
+                
+                // Check for parsing errors
+                const parserError = xmlDoc.querySelector('parsererror');
+                if (parserError) {
+                    throw new Error('Invalid XML format');
+                }
+                console.log('✅ XML parsed successfully');
+                
+                // Extract data
+                let uidData = xmlDoc.querySelector('OfflinePaperlessKyc > UidData');
+                if (!uidData) {
+                    uidData = xmlDoc.querySelector('UidData');
+                }
+                
+                if (!uidData) {
+                    throw new Error('UidData not found');
+                }
+                console.log('✅ Found UidData element');
+                
+                const poi = uidData.querySelector('Poi');
+                if (!poi) {
+                    throw new Error('POI data not found');
+                }
+                console.log('✅ Found POI element');
+                
+                const poa = uidData.querySelector('Poa');
+                if (poa) {
+                    console.log('✅ Found POA element');
+                } else {
+                    console.warn('⚠️ POA element not found');
+                }
+                
+                // Extract attributes
+                const uid = uidData.getAttribute('uid') || 
+                           xmlDoc.querySelector('OfflinePaperlessKyc')?.getAttribute('referenceId') || '';
+                const name = poi.getAttribute('name') || '';
+                const dob = poi.getAttribute('dob') || '';
+                const gender = poi.getAttribute('gender') || '';
+                const email = poi.getAttribute('e') || '';
+                const phone = poi.getAttribute('m') || '';
+                
+                const address = {
+                    house: poa?.getAttribute('house') || '',
+                    street: poa?.getAttribute('street') || '',
+                    locality: poa?.getAttribute('loc') || '',
+                    vtc: poa?.getAttribute('vtc') || '',
+                    district: poa?.getAttribute('dist') || '',
+                    subdist: poa?.getAttribute('subdist') || '',
+                    state: poa?.getAttribute('state') || '',
+                    country: poa?.getAttribute('country') || 'India',
+                    pincode: poa?.getAttribute('pc') || '',
+                    postoffice: poa?.getAttribute('po') || '',
+                    careof: poa?.getAttribute('careof') || poa?.getAttribute('co') || '',
+                };
+                
+                console.log('📊 Extracted Data:');
+                console.log(`  Name: ${name}`);
+                console.log(`  DOB: ${dob}`);
+                console.log(`  Gender: ${gender}`);
+                console.log(`  Country: ${address.country}`);
+                console.log(`  State: ${address.state}`);
+                console.log(`  District: ${address.district}`);
+                
+                // Display results
+                const resultContent = document.getElementById('resultContent');
+                resultContent.innerHTML = `
+                    <div class="field success">
+                        <div class="field-label">✅ Parsing Successful</div>
+                    </div>
+                    <div class="field">
+                        <div class="field-label">UID / Reference ID</div>
+                        <div class="field-value">${uid || 'Not found'}</div>
+                    </div>
+                    <div class="field">
+                        <div class="field-label">Name</div>
+                        <div class="field-value">${name || 'Not found'}</div>
+                    </div>
+                    <div class="field">
+                        <div class="field-label">Date of Birth</div>
+                        <div class="field-value">${dob || 'Not found'}</div>
+                    </div>
+                    <div class="field">
+                        <div class="field-label">Gender</div>
+                        <div class="field-value">${gender || 'Not found'}</div>
+                    </div>
+                    <div class="field">
+                        <div class="field-label">Country (Citizenship)</div>
+                        <div class="field-value" style="font-weight: bold; color: #667eea;">
+                            ${address.country || 'Not found'}
+                        </div>
+                    </div>
+                    <div class="field">
+                        <div class="field-label">State</div>
+                        <div class="field-value">${address.state || 'Not found'}</div>
+                    </div>
+                    <div class="field">
+                        <div class="field-label">District</div>
+                        <div class="field-value">${address.district || 'Not found'}</div>
+                    </div>
+                    <div class="field">
+                        <div class="field-label">Full Address</div>
+                        <div class="field-value">
+                            ${address.house} ${address.street}<br>
+                            ${address.locality} ${address.vtc}<br>
+                            ${address.district} ${address.subdist}<br>
+                            ${address.state} - ${address.pincode}<br>
+                            ${address.country}
+                        </div>
+                    </div>
+                `;
+                
+                document.getElementById('results').classList.add('show');
+                
+            } catch (error) {
+                console.error('❌ Parsing failed:', error.message);
+                
+                const resultContent = document.getElementById('resultContent');
+                resultContent.innerHTML = `
+                    <div class="field error">
+                        <div class="field-label">❌ Parsing Failed</div>
+                        <div class="field-value">${error.message}</div>
+                    </div>
+                `;
+                
+                document.getElementById('results').classList.add('show');
+            }
+        });
+    </script>
+</body>
+</html>

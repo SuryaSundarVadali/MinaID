@@ -84,16 +84,29 @@ export function validateProofData(proof: any): { valid: boolean; error?: string 
     return { valid: false, error: 'Proof must be an object' };
   }
 
-  if (!proof.id || typeof proof.id !== 'string') {
+  // Support both old format (id, type) and new format (proofType, metadata.proofId)
+  // Check proofType first (new format) before falling back to type (old format)
+  const proofId = proof.metadata?.proofId || proof.id;
+  const proofType = proof.proofType || proof.type;
+
+  if (!proofId || typeof proofId !== 'string') {
     return { valid: false, error: 'Proof must have a valid ID' };
   }
 
-  if (!proof.type || !['age', 'kyc', 'composite'].includes(proof.type)) {
-    return { valid: false, error: 'Proof must have a valid type (age, kyc, or composite)' };
+  // Accept various proof types
+  const validTypes = ['age', 'kyc', 'composite', 'citizenship', 'age18', 'age21'];
+  if (!proofType || !validTypes.includes(proofType)) {
+    return { valid: false, error: `Proof must have a valid type. Got: ${proofType}` };
   }
 
-  if (!proof.timestamp || typeof proof.timestamp !== 'number') {
+  const timestamp = proof.timestamp || proof.metadata?.generatedAt;
+  if (!timestamp) {
     return { valid: false, error: 'Proof must have a valid timestamp' };
+  }
+
+  // Validate proof data exists
+  if (!proof.proof) {
+    return { valid: false, error: 'Proof must contain proof data' };
   }
 
   return { valid: true };

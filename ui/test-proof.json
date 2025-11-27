@@ -1,0 +1,14 @@
+{
+  "version": "1.0",
+  "type": "mina-zkp-proof",
+  "proofType": "age18",
+  "did": "did:mina:B62qqWYLoCqdYTbBBEYBfyabrkWtAiNamjCsf3en5QiHE7d4irz2UN5",
+  "timestamp": 1762998844355,
+  "minimumAge": 18,
+  "proof": "{\"commitment\":\"9776642025637400792620500364100816948459110268341697670482483626629151551554\",\"signature\":\"7mXQt7EguNsC2LhgKw1u4pUpG1J2VxecESh3VPRidoVsb7WgHdDcx6uRfV21YCQib4kWAqyv2b8Tnhp3WzaqQ2c2zUvcPMP4\",\"actualAge\":21}",
+  "publicOutput": "9776642025637400792620500364100816948459110268341697670482483626629151551554",
+  "metadata": {
+    "generatedAt": "2025-11-13T01:54:04.355Z",
+    "proofId": "proof_1762998844355_81kg38zed"
+  }
+}

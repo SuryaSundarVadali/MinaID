@@ -71,6 +71,7 @@ export interface WalletContextValue {
 
   // Session management
   login: (passkeyId: string) => Promise<void>;
+  createSession: (did: string, passkeyId: string, walletType: WalletType) => void;
   logout: () => void;
   refreshSession: () => void;
 }
@@ -278,9 +279,19 @@ export function WalletProvider({ children }: WalletProviderProps) {
         type: 'privateKey',
       };
 
+      console.log('[WalletContext] Storing private key with:', {
+        effectiveDid,
+        type,
+        storageKey: storageKey.did,
+        passkeyId
+      });
+
       // Encrypt and store
       await secureStore(storageKey, privateKey, passkeyId);
+      
+      console.log('[WalletContext] Private key stored successfully');
     } catch (err: any) {
+      console.error('[WalletContext] Store failed:', err);
       throw new Error(`Failed to store ${type} private key: ${err.message}`);
     }
   }, [session]);
@@ -310,15 +321,25 @@ export function WalletProvider({ children }: WalletProviderProps) {
         type: 'privateKey',
       };
 
+      console.log('[WalletContext] Loading private key with:', {
+        effectiveDid,
+        type,
+        storageKey: storageKey.did,
+        passkeyId
+      });
+
       // Retrieve and decrypt
       const privateKey = await secureRetrieve(storageKey, passkeyId);
       
       if (!privateKey) {
+        console.error('[WalletContext] No private key found in storage');
         throw new Error(`No stored private key found for ${type}`);
       }
 
+      console.log('[WalletContext] Private key loaded successfully');
       return privateKey;
     } catch (err: any) {
+      console.error('[WalletContext] Load failed:', err);
       throw new Error(`Failed to load ${type} private key: ${err.message}`);
     }
   }, [session]);
@@ -401,6 +422,35 @@ export function WalletProvider({ children }: WalletProviderProps) {
   }, [authenticateWithPasskey]);
 
   /**
+   * Create a new session without authentication (for signup flow)
+   * @param did User's DID
+   * @param passkeyId Passkey credential ID
+   * @param walletType Type of wallet connected
+   */
+  const createSession = useCallback((did: string, passkeyId: string, walletType: WalletType): void => {
+    console.log('[WalletContext] Creating new session:', { did, passkeyId, walletType });
+
+    const newSession: WalletSession = {
+      did,
+      passkeyId,
+      wallets: [],
+      primaryWallet: walletType,
+      expiresAt: Date.now() + SESSION_DURATION,
+    };
+
+    setSession(newSession);
+    
+    // Store session
+    const sessionKey = `minaid:session:${did}`;
+    localStorage.setItem(sessionKey, JSON.stringify(newSession));
+    
+    // Also store a simple marker for quick checks
+    localStorage.setItem('minaid_session', 'active');
+    
+    console.log('[WalletContext] Session created successfully');
+  }, []);
+
+  /**
    * Logout and clear session
    */
   const logout = useCallback((): void => {
@@ -461,6 +511,7 @@ export function WalletProvider({ children }: WalletProviderProps) {
     loadPrivateKey,
     hasStoredKey,
     login,
+    createSession,
     logout,
     refreshSession,
   };

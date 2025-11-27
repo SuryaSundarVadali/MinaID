@@ -241,11 +241,13 @@ describe('DIDRegistry Contract', () => {
       
       const key = Poseidon.hash(env.user1.publicKey.toFields());
       const witness = merkleMap.getWitness(key);
-      const didHash = merkleMap.get(key);
+      const didHashValue = merkleMap.get(key);
+      const didHash = didHashValue !== undefined ? didHashValue : Field(0);
 
       const queryTx = await Mina.transaction(env.user1.publicKey, async () => {
         await didRegistry.verifyDID(
           env.user1.publicKey,
+          didHash,
           witness
         );
       });
@@ -259,13 +261,15 @@ describe('DIDRegistry Contract', () => {
 
     it('should return zero for non-existent DID', async () => {
       log.test('Querying non-existent DID');
-      
       const nonExistentKey = Poseidon.hash(env.issuer.publicKey.toFields());
       const witness = merkleMap.getWitness(nonExistentKey);
+      const didHashValue = merkleMap.get(nonExistentKey);
+      const didHash = didHashValue !== undefined ? didHashValue : Field(0);
 
       const queryTx = await Mina.transaction(env.issuer.publicKey, async () => {
         await didRegistry.verifyDID(
           env.issuer.publicKey,
+          didHash,
           witness
         );
       });
@@ -273,6 +277,7 @@ describe('DIDRegistry Contract', () => {
       await queryTx.prove();
       await queryTx.sign([env.issuer.privateKey]).send();
       
+      log.success('Non-existent DID returns zero (as expected)');
       log.success('Non-existent DID returns zero (as expected)');
     });
   });

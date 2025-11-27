@@ -37,23 +37,10 @@ export default function Home() {
         </p>
 
         <p className={styles.start}>
-          Get started by connecting your wallet
+          Choose an option to get started
         </p>
 
         <div className={styles.grid}>
-          <button
-            className={styles.card}
-            onClick={() => router.push('/signup')}
-          >
-            <h2>
-              <span>Connect Wallet</span>
-              <span>→</span>
-            </h2>
-            <p>
-              Create your decentralized identity with Face ID or Touch ID. Your keys, your control.
-            </p>
-          </button>
-
           <button
             className={styles.card}
             onClick={() => router.push('/login')}
@@ -63,37 +50,64 @@ export default function Home() {
               <span>→</span>
             </h2>
             <p>
-              Access your MinaID with biometric authentication. No passwords needed.
+              Access your MinaID with wallet authentication. Connect and go.
             </p>
           </button>
 
           <button
             className={styles.card}
-            onClick={() => router.push('/verifier')}
+            onClick={() => router.push('/signup')}
           >
             <h2>
-              <span>Verify Proofs</span>
+              <span>Sign Up</span>
               <span>→</span>
             </h2>
             <p>
-              Verify zero-knowledge proofs without accessing private data. Built for privacy.
+              Create your decentralized identity. Connect wallet and set up your profile.
             </p>
           </button>
 
-          <a
+          <button
             className={styles.card}
-            href="https://docs.minaprotocol.com"
-            target="_blank"
-            rel="noopener noreferrer"
+            onClick={() => router.push('/test-proofs')}
+            style={{ borderColor: '#00ff00' }}
           >
             <h2>
-              <span>Docs</span>
+              <span>🧪 Test Proofs</span>
               <span>→</span>
             </h2>
             <p>
-              Learn how MinaID uses Mina Protocol for decentralized identity management.
+              Test citizenship ZK proofs, age verification, and blockchain integration.
             </p>
-          </a>
+          </button>
+
+          <button
+            className={styles.card}
+            onClick={() => router.push('/test-wallet')}
+            style={{ borderColor: '#ff0099' }}
+          >
+            <h2>
+              <span>🔍 Diagnostics</span>
+              <span>→</span>
+            </h2>
+            <p>
+              Test wallet detection, connection, and passkey functionality.
+            </p>
+          </button>
+
+          <button
+            className={styles.card}
+            onClick={() => router.push('/admin')}
+            style={{ borderColor: '#ff9900' }}
+          >
+            <h2>
+              <span>🔧 Admin</span>
+              <span>→</span>
+            </h2>
+            <p>
+              Manage data, clear storage, and view system status.
+            </p>
+          </button>
         </div>
       </div>
     </GradientBG>

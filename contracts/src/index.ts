@@ -5,6 +5,14 @@ import {
   AgeProof, 
   AgeProofPublicInput 
 } from './AgeVerificationProgram.js';
+import {
+  CitizenshipVerificationProgram,
+  CitizenshipProof,
+  CitizenshipProofPublicInput,
+  createCitizenshipHash,
+  citizenshipToField,
+  compileCitizenshipProgram
+} from './CitizenshipProof.js';
 
 export { 
   DIDRegistry,
@@ -12,5 +20,11 @@ export {
   CredentialClaim,
   AgeVerificationProgram,
   AgeProof,
-  AgeProofPublicInput
+  AgeProofPublicInput,
+  CitizenshipVerificationProgram,
+  CitizenshipProof,
+  CitizenshipProofPublicInput,
+  createCitizenshipHash,
+  citizenshipToField,
+  compileCitizenshipProgram
 };

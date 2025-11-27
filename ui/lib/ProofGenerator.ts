@@ -24,6 +24,47 @@
 import { Field, Poseidon, PrivateKey, PublicKey, Signature } from 'o1js';
 import { generateAgeHash, calculateAge, type AadharData } from './AadharParser';
 
+// Helper function to convert string to hex (browser-compatible, no Buffer)
+function stringToHex(str: string): string {
+  const bytes = new TextEncoder().encode(str);
+  let hex = '';
+  for (let i = 0; i < Math.min(bytes.length, 31); i++) {
+    hex += bytes[i].toString(16).padStart(2, '0');
+  }
+  return hex;
+}
+
+// Helper function to convert base64 to hex (browser-compatible)
+function base64ToHex(base64: string): string {
+  // Use base64 alphabet for decoding
+  const base64abc = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
+  const l = base64.length;
+  const bytes: number[] = [];
+  
+  for (let i = 0; i < l; i += 4) {
+    const encoded1 = base64abc.indexOf(base64[i]);
+    const encoded2 = base64abc.indexOf(base64[i + 1]);
+    const encoded3 = base64abc.indexOf(base64[i + 2]);
+    const encoded4 = base64abc.indexOf(base64[i + 3]);
+    
+    if (encoded1 === -1 || encoded2 === -1) continue;
+    
+    bytes.push((encoded1 << 2) | (encoded2 >> 4));
+    if (encoded3 !== -1 && base64[i + 2] !== '=') {
+      bytes.push(((encoded2 & 15) << 4) | (encoded3 >> 2));
+    }
+    if (encoded4 !== -1 && base64[i + 3] !== '=') {
+      bytes.push(((encoded3 & 3) << 6) | encoded4);
+    }
+  }
+  
+  let hex = '';
+  for (let i = 0; i < Math.min(bytes.length, 31); i++) {
+    hex += bytes[i].toString(16).padStart(2, '0');
+  }
+  return hex;
+}
+
 // Types
 export interface ProofInput {
   privateData: any;       // Data to prove (not revealed)
@@ -85,7 +126,7 @@ export async function generateAgeProof(
 
     // Create age hash (commitment)
     const ageHash = await generateAgeHash(aadharData.dateOfBirth, proofSalt);
-    const ageHashField = Field.from(BigInt('0x' + Buffer.from(ageHash, 'base64').toString('hex')));
+    const ageHashField = Field.from(BigInt('0x' + base64ToHex(ageHash)));
 
     // Get public key
     const publicKey = privateKey.toPublicKey();
@@ -151,8 +192,8 @@ export async function generateKYCProof(
 
     // Create hash of KYC data
     const kycHash = Poseidon.hash([
-      Field.from(BigInt('0x' + Buffer.from(aadharData.uid, 'utf8').toString('hex').substring(0, 32))),
-      Field.from(BigInt('0x' + Buffer.from(aadharData.name, 'utf8').toString('hex').substring(0, 32))),
+      Field.from(BigInt('0x' + stringToHex(aadharData.uid))),
+      Field.from(BigInt('0x' + stringToHex(aadharData.name))),
       Field.from(Date.now()),
     ]);
 
@@ -362,7 +403,7 @@ export function generateNullifier(
 ): string {
   const nullifierInput = `${proof.publicOutput}:${context}:${proof.timestamp}`;
   const hash = Poseidon.hash([
-    Field.from(BigInt('0x' + Buffer.from(nullifierInput, 'utf8').toString('hex').substring(0, 32))),
+    Field.from(BigInt('0x' + stringToHex(nullifierInput))),
   ]);
   
   return hash.toString();
@@ -392,3 +433,294 @@ export function getProofValidityDays(proof: AgeProof | KYCProof | CredentialProo
   }
   return null;
 }
+
+/**
+ * Generate commitment for a credential attribute
+ * Creates a hash commitment that can be verified without revealing the value
+ * 
+ * @param value The attribute value (e.g., name, country)
+ * @param salt Random salt for privacy
+ * @returns Field commitment
+ */
+export function generateAttributeCommitment(value: string, salt: string): Field {
+  // Convert string to bytes and then to Field elements
+  const normalizedValue = value.toLowerCase().trim();
+  const valueBytes = new TextEncoder().encode(normalizedValue);
+  const saltBytes = new TextEncoder().encode(salt);
+  
+  console.log('[Commitment] Generating for value:', normalizedValue);
+  console.log('[Commitment] Value bytes length:', valueBytes.length);
+  console.log('[Commitment] Salt:', salt);
+  
+  // Create array of Field elements from bytes (limit to 31 bytes to fit in Field)
+  const valueFields: Field[] = [];
+  for (let i = 0; i < Math.min(valueBytes.length, 31); i++) {
+    valueFields.push(Field.from(valueBytes[i]));
+  }
+  
+  console.log('[Commitment] Value fields count:', valueFields.length);
+  
+  // Convert salt bytes to hex string for Field conversion
+  let saltHex = '';
+  for (let i = 0; i < Math.min(saltBytes.length, 16); i++) {
+    saltHex += saltBytes[i].toString(16).padStart(2, '0');
+  }
+  const saltField = Field.from(BigInt('0x' + saltHex));
+  
+  // Hash value fields with salt
+  const commitment = Poseidon.hash([...valueFields, saltField]);
+  console.log('[Commitment] Generated:', commitment.toString());
+  
+  return commitment;
+}
+
+/**
+ * Generate selective disclosure proof for a credential attribute
+ * Proves possession of an attribute without revealing it
+ * 
+ * @param attributeValue The actual attribute value
+ * @param attributeName Name of the attribute (e.g., "name", "citizenship")
+ * @param privateKey User's private key
+ * @param salt Random salt (should match the one used in proof generation)
+ * @returns Selective disclosure proof
+ */
+export function generateSelectiveDisclosureProof(
+  attributeValue: string,
+  attributeName: string,
+  privateKey: PrivateKey,
+  salt: string
+): {
+  commitment: string;
+  signature: string;
+  attributeName: string;
+} {
+  const commitment = generateAttributeCommitment(attributeValue, salt);
+  const publicKey = privateKey.toPublicKey();
+  
+  // Create proof context
+  const proofContext = Poseidon.hash([
+    commitment,
+    Field.from(BigInt('0x' + stringToHex(attributeName))),
+    publicKey.toFields()[0],
+  ]);
+  
+  // Sign the proof context
+  const signature = Signature.create(privateKey, [proofContext]);
+  
+  return {
+    commitment: commitment.toString(),
+    signature: signature.toBase58(),
+    attributeName,
+  };
+}
+
+/**
+ * Verify selective disclosure proof
+ * Verifies that the prover knows an attribute value that matches the expected value
+ * 
+ * @param expectedValue The value the verifier expects
+ * @param proofCommitment The commitment from the proof
+ * @param salt The salt used (must be revealed by prover or agreed upon)
+ * @param signature The signature from the proof
+ * @param attributeName Name of the attribute being verified
+ * @param publicKey Prover's public key
+ * @returns True if verification succeeds
+ */
+export function verifySelectiveDisclosureProof(
+  expectedValue: string,
+  proofCommitment: string,
+  salt: string,
+  signature: string,
+  attributeName: string,
+  publicKey: PublicKey
+): boolean {
+  try {
+    console.log('[ZK Verify] Starting verification for', attributeName);
+    console.log('  Expected value:', expectedValue);
+    console.log('  Expected value (normalized):', expectedValue.toLowerCase().trim());
+    console.log('  Proof commitment:', proofCommitment);
+    console.log('  Salt:', salt);
+    
+    // Generate commitment from expected value
+    const expectedCommitment = generateAttributeCommitment(expectedValue, salt);
+    
+    console.log('  Generated commitment:', expectedCommitment.toString());
+    console.log('  Commitments match:', expectedCommitment.toString() === proofCommitment);
+    
+    // Check if commitments match
+    if (expectedCommitment.toString() !== proofCommitment) {
+      console.log('[ZK Verify] Commitment mismatch');
+      return false;
+    }
+    
+    // Verify signature
+    const proofContext = Poseidon.hash([
+      Field.from(proofCommitment),
+      Field.from(BigInt('0x' + stringToHex(attributeName))),
+      publicKey.toFields()[0],
+    ]);
+    
+    const sig = Signature.fromBase58(signature);
+    const isValid = sig.verify(publicKey, [proofContext]).toBoolean();
+    
+    if (!isValid) {
+      console.log('[ZK Verify] Signature verification failed');
+      return false;
+    }
+    
+    console.log('[ZK Verify] ✓ Verification successful');
+    return true;
+  } catch (error) {
+    console.error('[ZK Verify] Verification error:', error);
+    return false;
+  }
+}
+
+/**
+ * Generate Citizenship ZK Proof (Case-Insensitive)
+ * 
+ * Creates a zero-knowledge proof of citizenship using o1js Poseidon hashing.
+ * Supports case-insensitive matching (India, india, INDIA all work).
+ * 
+ * @param citizenship - User's citizenship (e.g., "India", "india")
+ * @param privateKey - User's private key for signing
+ * @param salt - Random salt for commitment
+ * @returns Citizenship proof data with commitment and signature
+ */
+export function generateCitizenshipZKProof(
+  citizenship: string,
+  privateKey: PrivateKey,
+  salt: string
+): {
+  commitment: string;
+  signature: string;
+  normalizedValue: string;
+} {
+  try {
+    console.log('[Citizenship ZK] Generating proof for:', citizenship);
+    
+    // Normalize to lowercase for case-insensitive matching
+    const normalized = citizenship.toLowerCase().trim();
+    console.log('[Citizenship ZK] Normalized to:', normalized);
+    
+    // Convert normalized citizenship to Field
+    const valueBytes = new TextEncoder().encode(normalized);
+    const valueFields: Field[] = [];
+    
+    // Convert each character to Field
+    for (let i = 0; i < valueBytes.length; i++) {
+      valueFields.push(Field(valueBytes[i]));
+    }
+    
+    // Create single hash from all characters
+    const citizenshipField = Poseidon.hash(valueFields);
+    console.log('[Citizenship ZK] Citizenship field:', citizenshipField.toString());
+    
+    // Create salted commitment
+    const saltField = Field.from(BigInt('0x' + stringToHex(salt)));
+    const commitment = Poseidon.hash([citizenshipField, saltField]);
+    
+    console.log('[Citizenship ZK] Commitment:', commitment.toString());
+    console.log('[Citizenship ZK] Salt field:', saltField.toString());
+    
+    // Sign the commitment
+    const publicKey = privateKey.toPublicKey();
+    const proofContext = Poseidon.hash([
+      commitment,
+      Field.from(BigInt('0x' + stringToHex('citizenship'))),
+      publicKey.toFields()[0],
+    ]);
+    
+    const signature = Signature.create(privateKey, [proofContext]);
+    
+    console.log('[Citizenship ZK] ✓ Proof generated successfully');
+    
+    return {
+      commitment: commitment.toString(),
+      signature: signature.toBase58(),
+      normalizedValue: normalized,
+    };
+  } catch (error) {
+    console.error('[Citizenship ZK] Error generating proof:', error);
+    throw error;
+  }
+}
+
+/**
+ * Verify Citizenship ZK Proof (Case-Insensitive)
+ * 
+ * Verifies a citizenship proof by comparing commitments.
+ * Automatically normalizes input to lowercase for case-insensitive matching.
+ * 
+ * @param expectedCitizenship - Expected citizenship value (case-insensitive)
+ * @param proofCommitment - Commitment from the proof
+ * @param salt - Salt used in commitment
+ * @param signature - Signature on the commitment
+ * @param publicKey - User's public key
+ * @returns True if proof is valid and citizenship matches
+ */
+export function verifyCitizenshipZKProof(
+  expectedCitizenship: string,
+  proofCommitment: string,
+  salt: string,
+  signature: string,
+  publicKey: PublicKey
+): boolean {
+  try {
+    console.log('[Citizenship ZK Verify] Verifying citizenship:', expectedCitizenship);
+    console.log('[Citizenship ZK Verify] Against commitment:', proofCommitment);
+    
+    // Normalize expected citizenship to lowercase
+    const normalized = expectedCitizenship.toLowerCase().trim();
+    console.log('[Citizenship ZK Verify] Normalized to:', normalized);
+    
+    // Convert normalized citizenship to Field
+    const valueBytes = new TextEncoder().encode(normalized);
+    const valueFields: Field[] = [];
+    
+    for (let i = 0; i < valueBytes.length; i++) {
+      valueFields.push(Field(valueBytes[i]));
+    }
+    
+    // Create single hash from all characters
+    const citizenshipField = Poseidon.hash(valueFields);
+    console.log('[Citizenship ZK Verify] Expected citizenship field:', citizenshipField.toString());
+    
+    // Recreate commitment with same salt
+    const saltField = Field.from(BigInt('0x' + stringToHex(salt)));
+    const expectedCommitment = Poseidon.hash([citizenshipField, saltField]);
+    
+    console.log('[Citizenship ZK Verify] Expected commitment:', expectedCommitment.toString());
+    console.log('[Citizenship ZK Verify] Proof commitment:', proofCommitment);
+    console.log('[Citizenship ZK Verify] Match:', expectedCommitment.toString() === proofCommitment);
+    
+    // Check if commitments match
+    if (expectedCommitment.toString() !== proofCommitment) {
+      console.log('[Citizenship ZK Verify] ✗ Commitment mismatch - citizenship does not match');
+      return false;
+    }
+    
+    // Verify signature
+    const commitment = Field.from(proofCommitment);
+    const proofContext = Poseidon.hash([
+      commitment,
+      Field.from(BigInt('0x' + stringToHex('citizenship'))),
+      publicKey.toFields()[0],
+    ]);
+    
+    const sig = Signature.fromBase58(signature);
+    const isValid = sig.verify(publicKey, [proofContext]).toBoolean();
+    
+    if (!isValid) {
+      console.log('[Citizenship ZK Verify] ✗ Signature verification failed');
+      return false;
+    }
+    
+    console.log('[Citizenship ZK Verify] ✓ Verification successful - citizenship matches!');
+    return true;
+  } catch (error) {
+    console.error('[Citizenship ZK Verify] Verification error:', error);
+    return false;
+  }
+}
+

@@ -5,6 +5,38 @@
  */
 
 /**
+ * Safe base64 decode without using atob (browser-compatible)
+ * @param base64 Base64 encoded string
+ * @returns Uint8Array of decoded bytes
+ */
+export function base64ToBytes(base64: string): Uint8Array {
+  const base64abc = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
+  const l = base64.length;
+  const placeHolders = base64[l - 2] === '=' ? 2 : base64[l - 1] === '=' ? 1 : 0;
+  const arr = new Uint8Array((l * 3 / 4) - placeHolders);
+  let j = 0;
+  
+  for (let i = 0; i < l; i += 4) {
+    const encoded1 = base64abc.indexOf(base64[i]);
+    const encoded2 = base64abc.indexOf(base64[i + 1]);
+    const encoded3 = base64abc.indexOf(base64[i + 2]);
+    const encoded4 = base64abc.indexOf(base64[i + 3]);
+    
+    if (encoded1 === -1 || encoded2 === -1) continue;
+    
+    arr[j++] = (encoded1 << 2) | (encoded2 >> 4);
+    if (encoded3 !== -1 && base64[i + 2] !== '=') {
+      arr[j++] = ((encoded2 & 15) << 4) | (encoded3 >> 2);
+    }
+    if (encoded4 !== -1 && base64[i + 3] !== '=') {
+      arr[j++] = ((encoded3 & 3) << 6) | encoded4;
+    }
+  }
+  
+  return arr;
+}
+
+/**
  * Content Security Policy configuration
  */
 export const CSP_DIRECTIVES = {

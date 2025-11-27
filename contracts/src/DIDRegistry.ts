@@ -120,15 +120,11 @@ export class DIDRegistry extends SmartContract {
     // Generate key from public key for Merkle Map
     const key = Poseidon.hash(userPublicKey.toFields());
 
-    // Verify the witness against current root (proving the key doesn't exist or has value 0)
+    // Verify the witness is valid for current root with value 0 (empty slot)
+    // This proves that the key doesn't currently have a value in the map
     const [witnessRoot, witnessKey] = witness.computeRootAndKey(Field(0));
-    currentRoot.assertEquals(witnessRoot, 'Invalid Merkle witness');
+    currentRoot.assertEquals(witnessRoot, 'Invalid Merkle witness or DID already registered');
     key.assertEquals(witnessKey, 'Key mismatch in witness');
-
-    // Check that this DID is not already registered
-    // If it was registered, the witness would show a non-zero value
-    const [, currentValue] = witness.computeRootAndKey(Field(0));
-    currentValue.assertEquals(Field(0), 'DID already registered');
 
     // Update the Merkle Map with the new DID
     const [newRoot] = witness.computeRootAndKey(didDocumentHash);
@@ -250,11 +246,13 @@ export class DIDRegistry extends SmartContract {
    * This method emits an event with the DID status for off-chain indexing
    * 
    * @param userPublicKey - The public key to check
+   * @param didHash - The expected DID document hash (or Field(0) if checking for non-existence)
    * @param witness - Merkle witness for the query
    */
   @method
   async verifyDID(
     userPublicKey: PublicKey,
+    didHash: Field,
     witness: MerkleMapWitness
   ) {
     // Get current Merkle Map root
@@ -263,13 +261,10 @@ export class DIDRegistry extends SmartContract {
     // Generate key from public key
     const key = Poseidon.hash(userPublicKey.toFields());
 
-    // Get the value from witness
-    const [witnessRoot, witnessKey] = witness.computeRootAndKey(Field(0));
+    // Verify the witness against the current root with the provided value
+    const [witnessRoot, witnessKey] = witness.computeRootAndKey(didHash);
     currentRoot.assertEquals(witnessRoot, 'Invalid Merkle witness');
     witnessKey.assertEquals(key, 'Key mismatch in witness');
-
-    // Get the DID document hash (0 if not registered)
-    const [, didHash] = witness.computeRootAndKey(Field(0));
     
     // Emit verification event for off-chain queries
     this.emitEvent('DIDVerified', new DIDVerifiedEvent({

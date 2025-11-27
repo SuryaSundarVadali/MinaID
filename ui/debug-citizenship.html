@@ -1,0 +1,77 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Debug Citizenship Value</title>
+    <style>
+        body { font-family: Arial, sans-serif; padding: 20px; }
+        .result { background: #f0f0f0; padding: 15px; margin: 10px 0; border-radius: 5px; }
+        pre { background: #333; color: #0f0; padding: 10px; overflow-x: auto; }
+    </style>
+</head>
+<body>
+    <h1>🔍 Debug Citizenship Value</h1>
+    <p>This tool will show you what citizenship value is stored in your Aadhar data.</p>
+    
+    <div>
+        <label>Enter your DID:</label><br>
+        <input type="text" id="did" placeholder="did:mina:B62..." style="width: 500px; padding: 8px;">
+        <button onclick="checkCitizenship()">Check</button>
+    </div>
+    
+    <div id="result"></div>
+    
+    <script>
+        function checkCitizenship() {
+            const did = document.getElementById('did').value.trim();
+            if (!did) {
+                alert('Please enter your DID');
+                return;
+            }
+            
+            const aadharKey = `aadhar_${did}`;
+            const aadharStr = localStorage.getItem(aadharKey);
+            
+            if (!aadharStr) {
+                document.getElementById('result').innerHTML = `
+                    <div class="result" style="background: #ffe0e0;">
+                        <h3>❌ No Aadhar Data Found</h3>
+                        <p>No Aadhar data found for DID: <code>${did}</code></p>
+                        <p>Make sure you've uploaded your Aadhar XML and completed signup.</p>
+                    </div>
+                `;
+                return;
+            }
+            
+            try {
+                const aadharData = JSON.parse(aadharStr);
+                const country = aadharData.address?.country || 'NOT SET';
+                
+                document.getElementById('result').innerHTML = `
+                    <div class="result" style="background: #e0ffe0;">
+                        <h3>✅ Aadhar Data Found</h3>
+                        <p><strong>DID:</strong> <code>${did}</code></p>
+                        <p><strong>Name:</strong> <code>${aadharData.name || 'NOT SET'}</code></p>
+                        <p><strong>Country/Citizenship:</strong> <code>${country}</code></p>
+                        <p><strong>Country (lowercase):</strong> <code>${country.toLowerCase()}</code></p>
+                        
+                        <h4>Full Address Object:</h4>
+                        <pre>${JSON.stringify(aadharData.address, null, 2)}</pre>
+                        
+                        <div style="background: #fff3cd; padding: 10px; margin-top: 15px; border-radius: 5px;">
+                            <strong>🔐 For ZK Verification:</strong><br>
+                            When verifying, enter exactly: <code style="background: #fff; padding: 5px;">${country}</code>
+                        </div>
+                    </div>
+                `;
+            } catch (e) {
+                document.getElementById('result').innerHTML = `
+                    <div class="result" style="background: #ffe0e0;">
+                        <h3>❌ Error Parsing Data</h3>
+                        <p>Error: ${e.message}</p>
+                    </div>
+                `;
+            }
+        }
+    </script>
+</body>
+</html>

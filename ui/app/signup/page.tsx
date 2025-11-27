@@ -1,5 +1,5 @@
-import { SignupOrchestrator } from '../../components/SignupOrchestrator';
+import { SimpleSignup } from '../../components/auth/SimpleSignup';
 
 export default function SignupPage() {
-  return <SignupOrchestrator />;
+  return <SimpleSignup />;
 }

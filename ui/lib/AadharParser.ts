@@ -84,8 +84,18 @@ export async function parseAadharXML(xmlFile: File): Promise<AadharVerificationR
       };
     }
 
-    // Extract demographic data
-    const uidData = xmlDoc.querySelector('UidData');
+    // UIDAI eAadhaar XML can have two formats:
+    // 1. New format: <OfflinePaperlessKyc><UidData>...</UidData></OfflinePaperlessKyc>
+    // 2. Old format: <UidData>...</UidData> (direct root)
+    
+    // Check for OfflinePaperlessKyc root (new format)
+    let uidData = xmlDoc.querySelector('OfflinePaperlessKyc > UidData');
+    
+    // If not found, check for UidData as direct root (old format)
+    if (!uidData) {
+      uidData = xmlDoc.querySelector('UidData');
+    }
+
     if (!uidData) {
       return {
         isValid: false,
@@ -94,7 +104,7 @@ export async function parseAadharXML(xmlFile: File): Promise<AadharVerificationR
     }
 
     // Extract POI (Proof of Identity) data
-    const poi = xmlDoc.querySelector('Poi');
+    const poi = uidData.querySelector('Poi');
     if (!poi) {
       return {
         isValid: false,
@@ -103,31 +113,46 @@ export async function parseAadharXML(xmlFile: File): Promise<AadharVerificationR
     }
 
     // Extract POA (Proof of Address) data
-    const poa = xmlDoc.querySelector('Poa');
+    const poa = uidData.querySelector('Poa');
 
-    // Extract demographic attributes
-    const uid = uidData.getAttribute('uid') || '';
+    // Extract demographic attributes from POI
+    // Note: uid is in UidData or OfflinePaperlessKyc referenceId
+    const uid = uidData.getAttribute('uid') || 
+                xmlDoc.querySelector('OfflinePaperlessKyc')?.getAttribute('referenceId') || '';
     const name = poi.getAttribute('name') || '';
     const dob = poi.getAttribute('dob') || '';
     const gender = (poi.getAttribute('gender') || 'M') as 'M' | 'F' | 'T';
-    const email = poi.getAttribute('email') || '';
-    const phone = poi.getAttribute('phone') || '';
+    const email = poi.getAttribute('e') || '';  // 'e' attribute for email hash
+    const phone = poi.getAttribute('m') || '';  // 'm' attribute for mobile hash
 
-    // Extract address
+    // Extract address from POA (Proof of Address)
+    // Per UIDAI spec: careof, country, dist, house, loc, pc, po, state, street, subdist, vtc
     const address = {
       house: poa?.getAttribute('house') || '',
       street: poa?.getAttribute('street') || '',
-      landmark: poa?.getAttribute('lm') || '',
+      landmark: poa?.getAttribute('lm') || '',  // landmark can be 'lm' or 'landmark'
       locality: poa?.getAttribute('loc') || '',
       vtc: poa?.getAttribute('vtc') || '',
       district: poa?.getAttribute('dist') || '',
+      subdist: poa?.getAttribute('subdist') || '',
       state: poa?.getAttribute('state') || '',
-      country: poa?.getAttribute('country') || 'India',
+      country: poa?.getAttribute('country') || 'India',  // Should be explicitly 'India' in XML
       pincode: poa?.getAttribute('pc') || '',
+      postoffice: poa?.getAttribute('po') || '',
+      careof: poa?.getAttribute('careof') || poa?.getAttribute('co') || '',
     };
 
     // Extract photo if present
     const photo = xmlDoc.querySelector('Pht')?.textContent || undefined;
+
+    // Log extracted data for debugging
+    console.log('📄 Aadhar XML Parsing Results:');
+    console.log('  Name:', name);
+    console.log('  DOB:', dob);
+    console.log('  Gender:', gender);
+    console.log('  Country:', address.country);
+    console.log('  State:', address.state);
+    console.log('  District:', address.district);
 
     // Verify digital signature
     const signatureValid = await verifyAadharSignature(xmlDoc);
@@ -167,44 +192,200 @@ export async function parseAadharXML(xmlFile: File): Promise<AadharVerificationR
  */
 async function verifyAadharSignature(xmlDoc: Document): Promise<boolean> {
   try {
-    // Find the Signature element
+    // Find the Signature element (XMLDSIG namespace)
     const signatureElement = xmlDoc.querySelector('Signature');
     if (!signatureElement) {
       console.warn('No signature found in Aadhar XML');
       return false;
     }
 
-    // Extract signature value
-    const signatureValue = signatureElement.querySelector('SignatureValue')?.textContent;
+    // Extract SignedInfo - this is what was actually signed
+    const signedInfo = signatureElement.querySelector('SignedInfo');
+    if (!signedInfo) {
+      console.warn('No SignedInfo found in signature');
+      return false;
+    }
+
+    // Extract signature value (Base64 encoded)
+    const signatureValue = signatureElement.querySelector('SignatureValue')?.textContent?.trim();
     if (!signatureValue) {
       console.warn('No signature value found');
       return false;
     }
 
-    // Extract signed info
-    const signedInfo = signatureElement.querySelector('SignedInfo');
-    if (!signedInfo) {
-      console.warn('No SignedInfo found');
-      return false;
+    // Extract certificate from KeyInfo (X509Certificate)
+    const x509Certificate = signatureElement.querySelector('KeyInfo X509Data X509Certificate')?.textContent?.trim();
+    if (!x509Certificate) {
+      console.warn('No X509Certificate found in KeyInfo, will attempt to use cached UIDAI certificate');
+      // Try to fetch UIDAI certificate
+      try {
+        const uidaiCert = await fetchUidaiCertificate();
+        return await verifyWithCertificate(xmlDoc, signedInfo, signatureValue, uidaiCert);
+      } catch (error) {
+        console.error('Failed to fetch UIDAI certificate:', error);
+        return false;
+      }
     }
 
-    // For now, we'll do basic validation
-    // Full XMLDSIG verification requires the UIDAI public certificate
-    // which should be fetched from UIDAI's website and cached
+    // Reconstruct PEM certificate from X509Certificate
+    const pemCertificate = `-----BEGIN CERTIFICATE-----\n${x509Certificate}\n-----END CERTIFICATE-----`;
+
+    // Verify the signature
+    return await verifyWithCertificate(xmlDoc, signedInfo, signatureValue, pemCertificate);
     
-    // TODO: Implement full XMLDSIG verification with UIDAI certificate
-    // This requires:
-    // 1. Download UIDAI public certificate
-    // 2. Canonicalize SignedInfo
-    // 3. Verify signature using certificate public key
-    
-    console.log('Signature validation: Basic structure check passed');
-    console.log('Note: Full XMLDSIG verification requires UIDAI certificate');
-    
-    return true;
   } catch (error) {
     console.error('Signature verification failed:', error);
     return false;
+  }
+}
+
+/**
+ * Verify XML signature using certificate
+ * @param xmlDoc The XML document
+ * @param signedInfo SignedInfo element
+ * @param signatureValue Base64 signature value
+ * @param pemCertificate PEM formatted certificate
+ * @returns True if valid
+ */
+async function verifyWithCertificate(
+  xmlDoc: Document,
+  signedInfo: Element,
+  signatureValue: string,
+  pemCertificate: string
+): Promise<boolean> {
+  try {
+    // Canonicalize SignedInfo (C14N - Canonical XML)
+    // Per UIDAI spec: http://www.w3.org/TR/2001/REC-xml-c14n-20010315
+    const canonicalizedSignedInfo = canonicalizeXML(signedInfo);
+    
+    // Convert canonicalized XML to bytes
+    const signedInfoBytes = new TextEncoder().encode(canonicalizedSignedInfo);
+    
+    // Decode signature from Base64
+    const signatureBytes = base64ToArrayBuffer(signatureValue);
+    
+    // Import certificate and extract public key
+    const publicKey = await importCertificate(pemCertificate);
+    
+    // Verify signature using RSA-SHA1 or RSA-SHA256
+    // UIDAI uses RSA-SHA1 per documentation
+    const isValid = await crypto.subtle.verify(
+      {
+        name: 'RSASSA-PKCS1-v1_5',
+        hash: { name: 'SHA-1' }, // UIDAI uses SHA-1 for signature
+      },
+      publicKey,
+      signatureBytes,
+      signedInfoBytes
+    );
+    
+    if (isValid) {
+      console.log('✅ UIDAI digital signature verified successfully');
+    } else {
+      console.warn('❌ UIDAI digital signature verification failed');
+    }
+    
+    return isValid;
+  } catch (error) {
+    console.error('Error verifying signature:', error);
+    return false;
+  }
+}
+
+/**
+ * Canonicalize XML element (C14N)
+ * Simplified implementation - for production, use a proper C14N library
+ * @param element XML element
+ * @returns Canonicalized XML string
+ */
+function canonicalizeXML(element: Element): string {
+  // Basic canonicalization: serialize element and normalize whitespace
+  // For full XMLDSIG compliance, should use proper C14N algorithm
+  // This is a simplified version that works for most cases
+  
+  const serializer = new XMLSerializer();
+  let xml = serializer.serializeToString(element);
+  
+  // Remove XML declaration if present
+  xml = xml.replace(/<\?xml[^?]*\?>/g, '');
+  
+  // Normalize whitespace between tags
+  xml = xml.replace(/>\s+</g, '><');
+  
+  return xml;
+}
+
+/**
+ * Convert Base64 string to ArrayBuffer
+ * @param base64 Base64 encoded string
+ * @returns ArrayBuffer
+ */
+function base64ToArrayBuffer(base64: string): ArrayBuffer {
+  // Use base64 alphabet for decoding
+  const base64abc = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
+  const l = base64.length;
+  const placeHolders = base64[l - 2] === '=' ? 2 : base64[l - 1] === '=' ? 1 : 0;
+  const arr = new Uint8Array((l * 3 / 4) - placeHolders);
+  let j = 0;
+  
+  for (let i = 0; i < l; i += 4) {
+    const encoded1 = base64abc.indexOf(base64[i]);
+    const encoded2 = base64abc.indexOf(base64[i + 1]);
+    const encoded3 = base64abc.indexOf(base64[i + 2]);
+    const encoded4 = base64abc.indexOf(base64[i + 3]);
+    
+    if (encoded1 === -1 || encoded2 === -1) continue;
+    
+    arr[j++] = (encoded1 << 2) | (encoded2 >> 4);
+    if (encoded3 !== -1 && base64[i + 2] !== '=') {
+      arr[j++] = ((encoded2 & 15) << 4) | (encoded3 >> 2);
+    }
+    if (encoded4 !== -1 && base64[i + 3] !== '=') {
+      arr[j++] = ((encoded3 & 3) << 6) | encoded4;
+    }
+  }
+  
+  return arr.buffer;
+}
+
+/**
+ * Import X509 certificate and extract public key
+ * @param pemCertificate PEM formatted certificate
+ * @returns CryptoKey public key
+ */
+async function importCertificate(pemCertificate: string): Promise<CryptoKey> {
+  // Remove PEM headers and decode Base64
+  const pemContents = pemCertificate
+    .replace(/-----BEGIN CERTIFICATE-----/, '')
+    .replace(/-----END CERTIFICATE-----/, '')
+    .replace(/\s/g, '');
+  
+  const binaryDer = base64ToArrayBuffer(pemContents);
+  
+  // Import certificate as X509 certificate
+  // We need to extract the public key from the certificate
+  // For simplicity, we'll use subtle.importKey with 'spki' format
+  // In production, parse the X509 certificate properly
+  
+  // For now, attempt to import as SPKI (this may not work for all certificates)
+  // A proper implementation would parse the X509 DER structure
+  try {
+    const publicKey = await crypto.subtle.importKey(
+      'spki',
+      binaryDer,
+      {
+        name: 'RSASSA-PKCS1-v1_5',
+        hash: { name: 'SHA-1' },
+      },
+      true,
+      ['verify']
+    );
+    return publicKey;
+  } catch (error) {
+    // If direct import fails, we need to extract the SubjectPublicKeyInfo from X509
+    console.error('Failed to import certificate directly, attempting to parse X509:', error);
+    // This requires proper X509 parsing - for now, throw error
+    throw new Error('Certificate import failed. Full X509 parsing not implemented.');
   }
 }
 
@@ -352,19 +533,42 @@ export function validateAadharFile(file: File): { valid: boolean; error?: string
 
 /**
  * Fetch UIDAI public certificate for signature verification
+ * @param preferredVersion Certificate version to use (2023, 2020, 2019, or auto)
  * @returns UIDAI certificate in PEM format
  */
-export async function fetchUidaiCertificate(): Promise<string> {
+export async function fetchUidaiCertificate(preferredVersion: string = 'auto'): Promise<string> {
   try {
-    // UIDAI certificate should be cached locally or fetched from trusted source
-    // For production, download from: https://uidai.gov.in/
+    // UIDAI certificate URLs per documentation:
+    // 1. Latest (2023): https://uidai.gov.in/images/authDoc/uidai_auth_sign_prod_2023.cer
+    // 2. Before June 7, 2020: https://uidai.gov.in/images/authDoc/uidai_auth_sign_prod.cer
+    // 3. Before June 18, 2019: https://uidai.gov.in/images/authDoc/uidai_auth_sign_prod.cer
     
-    const response = await fetch('/certificates/uidai-public.pem');
-    if (!response.ok) {
-      throw new Error('Failed to fetch UIDAI certificate');
+    const certificateVersions = [
+      { version: '2023', path: '/certificates/uidai_auth_sign_prod_2023.cer' },
+      { version: '2020', path: '/certificates/uidai_auth_sign_prod_2020.cer' },
+      { version: '2019', path: '/certificates/uidai_auth_sign_prod_2019.cer' },
+    ];
+    
+    // If auto, try from newest to oldest
+    const versionsToTry = preferredVersion === 'auto' 
+      ? certificateVersions 
+      : certificateVersions.filter(v => v.version === preferredVersion);
+    
+    for (const cert of versionsToTry) {
+      try {
+        const response = await fetch(cert.path);
+        if (response.ok) {
+          const certData = await response.text();
+          console.log(`✅ Loaded UIDAI certificate version ${cert.version}`);
+          return certData;
+        }
+      } catch (error) {
+        console.warn(`Failed to load certificate ${cert.version}:`, error);
+        continue;
+      }
     }
     
-    return await response.text();
+    throw new Error('No UIDAI certificate available. Please download from https://uidai.gov.in/');
   } catch (error) {
     console.error('Failed to fetch UIDAI certificate:', error);
     throw new Error('UIDAI certificate not available. Signature verification disabled.');

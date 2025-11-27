@@ -17,17 +17,20 @@
 import React, { useEffect, ReactNode } from 'react';
 import { useRouter } from 'next/navigation';
 import { useWallet } from '../../context/WalletContext';
+import { ProofStorage } from '../../lib/ProofStorage';
 
 interface ProtectedRouteProps {
   children: ReactNode;
   redirectTo?: string;
   requireSession?: boolean;
+  requireVerifiedProof?: boolean; // New prop for dashboard protection
 }
 
 export function ProtectedRoute({ 
   children, 
   redirectTo = '/login',
-  requireSession = true 
+  requireSession = true,
+  requireVerifiedProof = false
 }: ProtectedRouteProps) {
   const { isConnected, session } = useWallet();
   const router = useRouter();
@@ -37,8 +40,21 @@ export function ProtectedRoute({
     if (!isConnected || (requireSession && !session)) {
       console.log('[ProtectedRoute] Redirecting to login - not authenticated');
       router.push(redirectTo);
+      return;
     }
-  }, [isConnected, session, requireSession, redirectTo, router]);
+
+    // Check if verified proof is required (for dashboard)
+    if (requireVerifiedProof && session?.did) {
+      const proofs = ProofStorage.getProofsByDID(session.did);
+      const hasVerifiedProof = proofs.some((p: any) => p.status === 'verified');
+      
+      if (!hasVerifiedProof) {
+        console.log('[ProtectedRoute] Redirecting to DID proof - no verified proof');
+        router.push('/did-proof');
+        return;
+      }
+    }
+  }, [isConnected, session, requireSession, requireVerifiedProof, redirectTo, router]);
 
   // Show loading state while checking auth
   if (!isConnected || (requireSession && !session)) {
