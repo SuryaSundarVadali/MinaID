@@ -30,7 +30,7 @@ import type {
   RegistrationResponseJSON,
   AuthenticationResponseJSON,
 } from '@simplewebauthn/browser';
-import { generateChallenge } from '../lib/CryptoUtils';
+import { generateChallenge, bufferToBase64Url } from '../lib/CryptoUtils';
 
 // Types
 export interface PasskeyInfo {
@@ -107,7 +107,7 @@ export function usePasskey(): UsePasskeyReturn {
           id: window.location.hostname,
         },
         user: {
-          id: did,  // Use DID as user handle
+          id: bufferToBase64Url(new TextEncoder().encode(did)),
           name: did,
           displayName,
         },
@@ -126,6 +126,7 @@ export function usePasskey(): UsePasskeyReturn {
       };
 
       // Start WebAuthn registration
+      console.log('Starting registration with options:', JSON.stringify(options, null, 2));
       const attestation = await startRegistration({ optionsJSON: options });
 
       // Extract credential ID and public key

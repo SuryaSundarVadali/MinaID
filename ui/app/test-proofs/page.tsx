@@ -176,12 +176,12 @@ export default function TestProofsPage() {
       const contractInterface = await getContractInterface();
       addResult(`  Contract interface initialized: ✅`);
 
-      addResult('\n📝 Test 3: Simulation Mode Check');
-      addResult(`  Note: Actual blockchain transactions require:`);
-      addResult(`    - Compiled contracts`);
+      addResult('\n📝 Test 3: Blockchain Requirements');
+      addResult(`  Note: All blockchain operations require:`);
+      addResult(`    - Deployed contracts (no simulation mode)`);
       addResult(`    - Funded wallet`);
       addResult(`    - Network connection`);
-      addResult(`  Tests will use simulation mode for safety`);
+      addResult(`  Verification will fail if contracts are not deployed`);
 
       addResult('\n' + '━'.repeat(60));
       addResult('✅ Blockchain Integration Tests Completed!');

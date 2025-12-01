@@ -113,6 +113,7 @@ export async function generateAgeProof(
   privateKey: PrivateKey,
   salt?: string
 ): Promise<AgeProof> {
+  console.log('[ProofGenerator] generateAgeProof v2 - with hex fix'); // Version marker
   try {
     // Calculate actual age
     const actualAge = calculateAge(aadharData.dateOfBirth);
@@ -125,16 +126,26 @@ export async function generateAgeProof(
     const proofSalt = salt || Math.random().toString(36).substring(7);
 
     // Create age hash (commitment)
+    // generateAgeHash returns a hex string, so use it directly
     const ageHash = await generateAgeHash(aadharData.dateOfBirth, proofSalt);
-    const ageHashField = Field.from(BigInt('0x' + base64ToHex(ageHash)));
+    // ageHash is already a hex string (e.g., "a1b2c3..."), so prefix with 0x
+    const ageHashField = Field.from(BigInt('0x' + ageHash));
+    
+    console.log('[ProofGenerator] ageHash (hex):', ageHash);
+    console.log('[ProofGenerator] ageHashField:', ageHashField.toString());
 
     // Get public key
     const publicKey = privateKey.toPublicKey();
 
+    // IMPORTANT: Contract uses a global minimumAge state set to 18
+    // We must use this value in the commitment, not the local minimumAge
+    // The local minimumAge is still used to validate the user meets the requirement
+    const CONTRACT_MINIMUM_AGE = 18;
+
     // Create public input
     const publicInput = {
       subjectPublicKey: publicKey,
-      minimumAge: Field.from(minimumAge),
+      minimumAge: Field.from(CONTRACT_MINIMUM_AGE), // Use contract's expected value
       ageHash: ageHashField,
       issuerPublicKey: publicKey, // Self-attested for now
       timestamp: Field.from(Date.now()),
@@ -142,14 +153,27 @@ export async function generateAgeProof(
 
     // Generate proof using AgeVerificationProgram
     // NOTE: This requires the ZkProgram to be compiled and loaded
-    // For now, we'll create a simulated proof structure
+    // For now, we create a proof structure that matches the contract expectation
     
+    // Contract expects: Poseidon.hash([ageHash, minAge, subject, issuer, timestamp])
+    // Use CONTRACT_MINIMUM_AGE (18) to match what the contract will compute
     const commitment = Poseidon.hash([
-      publicKey.toFields()[0],
-      Field.from(minimumAge),
       ageHashField,
-      Field.from(Date.now()),
+      Field.from(CONTRACT_MINIMUM_AGE),
+      ...publicKey.toFields(),
+      ...publicKey.toFields(), // issuer is same as subject for self-attested
+      publicInput.timestamp,
     ]);
+
+    // Debug: Log exact commitment computation values
+    console.log('[ProofGenerator] Age proof commitment computation:');
+    console.log('  ageHashField:', ageHashField.toString());
+    console.log('  CONTRACT_MINIMUM_AGE:', CONTRACT_MINIMUM_AGE);
+    console.log('  Field(CONTRACT_MINIMUM_AGE):', Field.from(CONTRACT_MINIMUM_AGE).toString());
+    console.log('  publicKey:', publicKey.toBase58());
+    console.log('  publicKey.toFields():', publicKey.toFields().map(f => f.toString()));
+    console.log('  timestamp:', publicInput.timestamp.toString());
+    console.log('  commitment:', commitment.toString());
 
     // Sign the commitment
     const signature = Signature.create(privateKey, [commitment]);
@@ -158,11 +182,12 @@ export async function generateAgeProof(
       proof: JSON.stringify({
         commitment: commitment.toString(),
         signature: signature.toBase58(),
-        actualAge: actualAge, // Not revealed in production - remove this
+        ageHash: ageHashField.toString(),
+        publicKey: publicKey.toBase58(), // Include public key for verification
       }),
       publicOutput: commitment.toString(),
-      minimumAge,
-      timestamp: Date.now(),
+      minimumAge, // Store the actual requested minimumAge for reference
+      timestamp: Number(publicInput.timestamp.toString()),
       expiresAt: Date.now() + (365 * 24 * 60 * 60 * 1000), // 1 year
     };
 
@@ -197,16 +222,32 @@ export async function generateKYCProof(
       Field.from(Date.now()),
     ]);
 
-    // Sign the KYC hash
-    const signature = Signature.create(privateKey, [kycHash]);
+    // Contract expects: Poseidon.hash([kycHash, subject, issuer, Field(1)])
+    const commitment = Poseidon.hash([
+      kycHash,
+      ...publicKey.toFields(),
+      ...publicKey.toFields(), // issuer is same as subject
+      Field(1)
+    ]);
+
+    // Debug log
+    console.log('[ProofGenerator] KYC Proof Generation:');
+    console.log('  PublicKey:', publicKey.toBase58());
+    console.log('  PublicKey fields:', publicKey.toFields().map(f => f.toString()));
+    console.log('  kycHash:', kycHash.toString());
+    console.log('  Commitment:', commitment.toString());
+
+    // Sign the commitment (not just kycHash)
+    const signature = Signature.create(privateKey, [commitment]);
 
     const proof: KYCProof = {
       proof: JSON.stringify({
         kycHash: kycHash.toString(),
+        commitment: commitment.toString(),
         signature: signature.toBase58(),
         publicKey: publicKey.toBase58(),
       }),
-      publicOutput: kycHash.toString(),
+      publicOutput: commitment.toString(), // Use commitment as public output
       issuer: 'UIDAI',
       timestamp: Date.now(),
       attributes,
@@ -444,11 +485,13 @@ export function getProofValidityDays(proof: AgeProof | KYCProof | CredentialProo
  */
 export function generateAttributeCommitment(value: string, salt: string): Field {
   // Convert string to bytes and then to Field elements
-  const normalizedValue = value.toLowerCase().trim();
+  // Normalize: lowercase, trim, and collapse multiple spaces to single space
+  const normalizedValue = value.toLowerCase().trim().replace(/\s+/g, ' ');
   const valueBytes = new TextEncoder().encode(normalizedValue);
   const saltBytes = new TextEncoder().encode(salt);
   
-  console.log('[Commitment] Generating for value:', normalizedValue);
+  console.log('[Commitment] Original value:', value);
+  console.log('[Commitment] Normalized value:', normalizedValue);
   console.log('[Commitment] Value bytes length:', valueBytes.length);
   console.log('[Commitment] Salt:', salt);
   
@@ -535,13 +578,16 @@ export function verifySelectiveDisclosureProof(
   publicKey: PublicKey
 ): boolean {
   try {
+    // Apply same normalization as generateAttributeCommitment
+    const normalizedExpected = expectedValue.toLowerCase().trim().replace(/\s+/g, ' ');
+    
     console.log('[ZK Verify] Starting verification for', attributeName);
-    console.log('  Expected value:', expectedValue);
-    console.log('  Expected value (normalized):', expectedValue.toLowerCase().trim());
+    console.log('  Expected value (input):', expectedValue);
+    console.log('  Expected value (normalized):', normalizedExpected);
     console.log('  Proof commitment:', proofCommitment);
     console.log('  Salt:', salt);
     
-    // Generate commitment from expected value
+    // Generate commitment from expected value (uses same normalization)
     const expectedCommitment = generateAttributeCommitment(expectedValue, salt);
     
     console.log('  Generated commitment:', expectedCommitment.toString());
@@ -549,7 +595,8 @@ export function verifySelectiveDisclosureProof(
     
     // Check if commitments match
     if (expectedCommitment.toString() !== proofCommitment) {
-      console.log('[ZK Verify] Commitment mismatch');
+      console.log('[ZK Verify] ❌ Commitment mismatch - values do not match');
+      console.log('[ZK Verify] Hint: Make sure the name matches exactly (case-insensitive, but spelling must match)');
       return false;
     }
     

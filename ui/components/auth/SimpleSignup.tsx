@@ -114,11 +114,32 @@ export function SimpleSignup() {
     setState(prev => ({ ...prev, error: undefined }));
 
     try {
-      // Generate Mina private/public key pair
-      const privateKey = PrivateKey.random();
-      const publicKey = privateKey.toPublicKey();
-
-      console.log('[SimpleSignup] Generated keys for DID:', state.did);
+      // Check if we have a stored private key for this DID
+      // This prevents generating a new address every time if the user refreshes
+      let privateKey: PrivateKey | undefined;
+      let publicKey: PublicKey;
+      
+      // If using Auro wallet, we use the wallet address as DID
+      if (state.selectedWallet === 'auro' && state.walletAddress) {
+        console.log('[SimpleSignup] Using Auro wallet address as DID:', state.walletAddress);
+        publicKey = PublicKey.fromBase58(state.walletAddress);
+        // No private key available for Auro wallet
+      } else {
+        const storedKey = localStorage.getItem(`minaid_temp_key_${state.did}`);
+        if (storedKey) {
+          console.log('[SimpleSignup] Using stored temporary key for DID:', state.did);
+          privateKey = PrivateKey.fromBase58(storedKey);
+          publicKey = privateKey.toPublicKey();
+        } else {
+          // Generate new Mina private/public key pair
+          privateKey = PrivateKey.random();
+          publicKey = privateKey.toPublicKey();
+          
+          // Store temporarily to survive refresh until passkey is created
+          localStorage.setItem(`minaid_temp_key_${state.did}`, privateKey.toBase58());
+        }
+        console.log('[SimpleSignup] Generated keys for DID:', state.did);
+      }
 
       // Create Passkey with biometric authentication
       const passkey = await createPasskey(
@@ -129,7 +150,13 @@ export function SimpleSignup() {
       console.log('[SimpleSignup] Passkey created:', passkey.id);
 
       // Encrypt and store private key with Passkey
-      await storePrivateKey(state.selectedWallet, privateKey.toBase58(), passkey.id, state.did);
+      // If using Auro wallet, we store a marker string
+      await storePrivateKey(
+        state.selectedWallet, 
+        privateKey ? privateKey.toBase58() : 'WALLET_MANAGED', 
+        passkey.id, 
+        state.did
+      );
 
       console.log('[SimpleSignup] Private key stored securely');
 
@@ -151,7 +178,7 @@ export function SimpleSignup() {
       localStorage.setItem('minaid_wallet_connected', JSON.stringify(signupData));
 
       // Register DID on blockchain (async, don't block UI)
-      registerDIDOnChain(state.did, publicKey.toBase58(), privateKey.toBase58())
+      registerDIDOnChain(state.did, publicKey.toBase58(), privateKey?.toBase58())
         .then((txHash: string | null) => {
           if (txHash) {
             console.log('[SimpleSignup] DID registered on blockchain:', txHash);

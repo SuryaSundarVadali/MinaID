@@ -1,3 +1,7 @@
 ui/public/cache/
 ui/public/cache/
 .vercel
+server/public/cache/
+server/node_modules/
+logs/
+node_modules/

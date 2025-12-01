@@ -39,14 +39,36 @@ const SALT_LENGTH = 16;
 const IV_LENGTH = 12;
 
 /**
+ * Convert standard base64 to base64url format (RFC 4648)
+ * @param base64 Standard base64 string
+ * @returns Base64url string (URL-safe, no padding)
+ */
+function base64ToBase64Url(base64: string): string {
+  return base64
+    .replace(/\+/g, '-')
+    .replace(/\//g, '_')
+    .replace(/=/g, '');
+}
+
+/**
+ * Convert ArrayBuffer/Uint8Array to Base64url string (URL-safe, for WebAuthn)
+ * @param buffer The buffer to encode
+ * @returns Base64url encoded string
+ */
+export function bufferToBase64Url(buffer: Uint8Array | ArrayBuffer): string {
+  const base64 = bufferToBase64(buffer);
+  return base64ToBase64Url(base64);
+}
+
+/**
  * Generate a cryptographically secure random challenge
  * @param length Length of the challenge in bytes (default: 32)
- * @returns Base64 encoded challenge string
+ * @returns Base64url encoded challenge string (URL-safe for WebAuthn)
  */
 export async function generateChallenge(length: number = 32): Promise<string> {
   const buffer = new Uint8Array(length);
   crypto.getRandomValues(buffer);
-  return bufferToBase64(buffer);
+  return bufferToBase64Url(buffer);
 }
 
 /**
@@ -276,38 +298,15 @@ export function clearAllStorage(did?: string): void {
 
 /**
  * Convert ArrayBuffer/Uint8Array to Base64 string (browser-compatible)
- * Uses a safe method that works with all byte values
+ * Uses btoa for reliability
  */
-function bufferToBase64(buffer: Uint8Array | ArrayBuffer): string {
-  const bytes = buffer instanceof Uint8Array ? buffer : new Uint8Array(buffer);
-  const base64abc = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
-  let result = '';
-  let i;
-  const l = bytes.length;
-  
-  for (i = 2; i < l; i += 3) {
-    result += base64abc[(bytes[i - 2] >> 2)];
-    result += base64abc[(((bytes[i - 2] & 0x03) << 4) | (bytes[i - 1] >> 4))];
-    result += base64abc[(((bytes[i - 1] & 0x0f) << 2) | (bytes[i] >> 6))];
-    result += base64abc[(bytes[i] & 0x3f)];
+export function bufferToBase64(buffer: Uint8Array | ArrayBuffer): string {
+  const bytes = new Uint8Array(buffer);
+  let binary = '';
+  for (let i = 0; i < bytes.byteLength; i++) {
+    binary += String.fromCharCode(bytes[i]);
   }
-  
-  if (i === l + 1) {
-    // 1 byte left
-    result += base64abc[(bytes[i - 2] >> 2)];
-    result += base64abc[((bytes[i - 2] & 0x03) << 4)];
-    result += '==';
-  }
-  
-  if (i === l) {
-    // 2 bytes left
-    result += base64abc[(bytes[i - 2] >> 2)];
-    result += base64abc[(((bytes[i - 2] & 0x03) << 4) | (bytes[i - 1] >> 4))];
-    result += base64abc[((bytes[i - 1] & 0x0f) << 2)];
-    result += '=';
-  }
-  
-  return result;
+  return btoa(binary);
 }
 
 /**

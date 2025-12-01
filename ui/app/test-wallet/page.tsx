@@ -2,6 +2,7 @@
 
 import { useState } from 'react';
 import GradientBG from '../../components/GradientBG';
+import { bufferToBase64 } from '../../lib/CryptoUtils';
 
 export default function TestWallet() {
   const [logs, setLogs] = useState<string[]>([]);
@@ -112,7 +113,7 @@ export default function TestWallet() {
     try {
       const challenge = new Uint8Array(32);
       crypto.getRandomValues(challenge);
-      const challengeBase64 = btoa(String.fromCharCode(...challenge));
+      const challengeBase64 = bufferToBase64(challenge);
       
       addLog('   Creating registration options...');
       

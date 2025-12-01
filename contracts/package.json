@@ -22,6 +22,9 @@
     "testw": "npm run build && find build/src -name '*.test.js' -exec node --test --watch {} \\;",
     "lint": "npx eslint src/* --fix",
     "clear-cache": "npx rimraf cache/* !cache/README.md && npx rimraf cache.json && echo \"Cache cleared successfully!\"",
+    "generate-cache": "npm run build && node build/scripts/generate-cache.js",
+    "copy-cache": "node build/scripts/copy-cache-to-ui.js",
+    "generate-keys": "npm run build && node build/scripts/generate-keys.js",
     "deploy": "npm run build && node build/scripts/deploy.js",
     "deploy:local": "npm run build && node build/scripts/deploy-local.js"
   },

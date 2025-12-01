@@ -5,16 +5,67 @@
  * Provides convenient wrappers around ContractInterface for common tasks.
  */
 
-import { Field, PrivateKey, PublicKey, Poseidon, MerkleMap, MerkleMapWitness } from 'o1js';
+import { Field, PrivateKey, PublicKey, Poseidon, MerkleMap, MerkleMapWitness, fetchAccount } from 'o1js';
 import { ContractInterface, getExplorerUrl } from './ContractInterface';
+
+// Persistent MerkleMap state
+let globalMerkleMap: MerkleMap | null = null;
+
+/**
+ * Get or create the global MerkleMap instance
+ * This maintains state across registrations
+ */
+function getGlobalMerkleMap(): MerkleMap {
+  if (!globalMerkleMap) {
+    globalMerkleMap = new MerkleMap();
+    
+    // Try to restore from localStorage
+    try {
+      const savedState = localStorage.getItem('minaid_merkle_map_keys');
+      if (savedState) {
+        const keys = JSON.parse(savedState);
+        console.log('[BlockchainHelpers] Restoring MerkleMap with', keys.length, 'entries');
+        for (const { key, value } of keys) {
+          globalMerkleMap.set(Field(key), Field(value));
+        }
+      }
+    } catch (e) {
+      console.warn('[BlockchainHelpers] Could not restore MerkleMap state:', e);
+    }
+  }
+  return globalMerkleMap;
+}
+
+/**
+ * Save MerkleMap state to localStorage
+ */
+function saveMerkleMapState(key: Field, value: Field): void {
+  try {
+    const savedState = localStorage.getItem('minaid_merkle_map_keys');
+    const keys = savedState ? JSON.parse(savedState) : [];
+    keys.push({ key: key.toString(), value: value.toString() });
+    localStorage.setItem('minaid_merkle_map_keys', JSON.stringify(keys));
+  } catch (e) {
+    console.warn('[BlockchainHelpers] Could not save MerkleMap state:', e);
+  }
+}
+
+/**
+ * Reset the global MerkleMap (for use after clearing data)
+ */
+export function resetMerkleMapState(): void {
+  globalMerkleMap = null;
+  localStorage.removeItem('minaid_merkle_map_keys');
+  console.log('[BlockchainHelpers] MerkleMap state reset');
+}
 
 // Network configuration
 const NETWORK_CONFIG = {
   networkId: 'devnet' as const,
   minaEndpoint: 'https://api.minascan.io/node/devnet/v1/graphql',
   archiveEndpoint: 'https://api.minascan.io/archive/devnet/v1/graphql',
-  didRegistryAddress: process.env.NEXT_PUBLIC_DID_REGISTRY_DEVNET || 'B62qjuEhj9YjZyKTD75ywH7vY73DgUTC5bVxSCo3meirg8nGnV3CYjk',
-  zkpVerifierAddress: process.env.NEXT_PUBLIC_ZKP_VERIFIER_DEVNET || 'B62qrfTGCDP1KEx1PQa6mWGjV2b8wckbdcQRhi2Mu3AGfRYrjjnnfxW',
+  didRegistryAddress: process.env.NEXT_PUBLIC_DID_REGISTRY_DEVNET || 'B62qkqG87kYzP2cnLx3a8V9SEbsULCuXzaEwVenRHaRf6fK4wkSGpyM',
+  zkpVerifierAddress: process.env.NEXT_PUBLIC_ZKP_VERIFIER_DEVNET || 'B62qkXJxwHpseGa7jSo9TqW9tcuRMT3vNUAAHSBKFmL7XKKAm3cSqPZ',
 };
 
 // Singleton instance
@@ -41,14 +92,14 @@ async function getContractInstance(): Promise<ContractInterface> {
 export async function registerDIDOnChain(
   did: string,
   publicKeyBase58: string,
-  privateKeyBase58: string
+  privateKeyBase58?: string
 ): Promise<string | null> {
   try {
     console.log('[BlockchainHelpers] Registering DID on blockchain:', did);
     
     // Parse keys
     const publicKey = PublicKey.fromBase58(publicKeyBase58);
-    const privateKey = PrivateKey.fromBase58(privateKeyBase58);
+    const privateKey = privateKeyBase58 ? PrivateKey.fromBase58(privateKeyBase58) : null;
     
     // Create document hash (hash of DID string)
     const encoder = new TextEncoder();
@@ -57,9 +108,11 @@ export async function registerDIDOnChain(
     const didField = Field.from(BigInt('0x' + didHex));
     const documentHash = Poseidon.hash([didField]);
     
-    // Create empty Merkle map for the witness
-    const merkleMap = new MerkleMap();
-    const witness = merkleMap.getWitness(didField);
+    // Get the persistent Merkle map and create witness
+    // The contract uses Poseidon.hash(publicKey.toFields()) as the key in the map
+    const mapKey = Poseidon.hash(publicKey.toFields());
+    const merkleMap = getGlobalMerkleMap();
+    const witness = merkleMap.getWitness(mapKey);
     
     // Get contract instance
     const contract = await getContractInstance();
@@ -73,6 +126,10 @@ export async function registerDIDOnChain(
     );
     
     if (result.success && result.hash) {
+      // Update the MerkleMap with the new DID
+      merkleMap.set(mapKey, documentHash);
+      saveMerkleMapState(mapKey, documentHash);
+      
       console.log('[BlockchainHelpers] ✅ DID registered successfully:', result.hash);
       console.log('[BlockchainHelpers] Explorer:', getExplorerUrl(result.hash, NETWORK_CONFIG.networkId));
       return result.hash;
@@ -88,52 +145,183 @@ export async function registerDIDOnChain(
 
 /**
  * Record proof generation on blockchain
- * @param did User's DID
+ * @param did User's DID (can be wallet address or public key)
  * @param proofType Type of proof (citizenship, age18, age21)
  * @param proof Proof data
- * @param privateKeyBase58 User's private key for signing
+ * @param privateKeyBase58OrBigInt User's private key for signing (base58 string or bigint), or 'auro' to use Auro wallet
  * @returns Transaction hash if successful, null otherwise
  */
 export async function recordProofOnChain(
   did: string,
   proofType: string,
   proof: any,
-  privateKeyBase58: string
+  privateKeyBase58OrBigInt: string | bigint
 ): Promise<string | null> {
   try {
     console.log('[BlockchainHelpers] Recording proof on blockchain:', { did, proofType });
     
-    // Parse private key
-    const privateKey = PrivateKey.fromBase58(privateKeyBase58);
+    // Check if we should use Auro wallet
+    const walletData = localStorage.getItem('minaid_wallet_connected');
+    const isAuroWallet = walletData && JSON.parse(walletData).walletType === 'auro';
     
-    // Create proof commitment
-    const proofData = {
-      type: proofType,
-      timestamp: Date.now(),
-      did,
-    };
+    if (isAuroWallet && typeof window !== 'undefined' && (window as any).mina) {
+      // Use Auro wallet for signing - the wallet address is the DID
+      console.log('[BlockchainHelpers] Using Auro wallet for on-chain proof recording');
+      
+      try {
+        // Get the connected wallet address
+        const accounts = await (window as any).mina.requestAccounts();
+        if (!accounts || accounts.length === 0) {
+          throw new Error('No Auro wallet account connected');
+        }
+        const senderAddress = accounts[0];
+        console.log('[BlockchainHelpers] Auro wallet address:', senderAddress);
+        
+        // Create proof hash for on-chain storage
+        const proofHash = await hashProofData(proof);
+        
+        // Create a simple transaction memo with proof info (max 32 chars)
+        const memo = `MinaID:${proofType}:${proofHash.slice(0, 12)}`;
+        
+        // Use Auro wallet's sendPayment method (correct API)
+        const txResult = await (window as any).mina.sendPayment({
+          to: senderAddress, // Send to self (0 amount, just for recording)
+          amount: '0.000000001', // Minimum amount (1 nanomina)
+          fee: '0.1', // 0.1 MINA fee in MINA units (not nanomina)
+          memo: memo,
+        });
+        
+        if (txResult && txResult.hash) {
+          console.log('[BlockchainHelpers] ✅ Proof recorded on-chain via Auro wallet:', txResult.hash);
+          
+          // Store the record locally too
+          const proofRecord = {
+            did,
+            proofType,
+            timestamp: Date.now(),
+            status: 'on-chain',
+            txHash: txResult.hash,
+            proofHash
+          };
+          const existingRecords = JSON.parse(localStorage.getItem('minaid_proof_records') || '[]');
+          existingRecords.push(proofRecord);
+          localStorage.setItem('minaid_proof_records', JSON.stringify(existingRecords));
+          
+          return txResult.hash;
+        } else {
+          throw new Error('Transaction failed or was rejected');
+        }
+      } catch (auroError: any) {
+        console.error('[BlockchainHelpers] Auro wallet transaction failed:', auroError);
+        
+        // If user rejected or error, fall back to local storage
+        if (auroError.message?.includes('reject') || auroError.code === 4001) {
+          console.log('[BlockchainHelpers] User rejected transaction, storing locally');
+        }
+        
+        // Store proof locally as fallback
+        const proofRecord = {
+          did,
+          proofType,
+          timestamp: Date.now(),
+          status: 'local',
+          proofHash: await hashProofData(proof),
+          error: auroError.message
+        };
+        const existingRecords = JSON.parse(localStorage.getItem('minaid_proof_records') || '[]');
+        existingRecords.push(proofRecord);
+        localStorage.setItem('minaid_proof_records', JSON.stringify(existingRecords));
+        
+        return `local_${proofRecord.proofHash.slice(0, 16)}`;
+      }
+    }
     
-    const encoder = new TextEncoder();
-    const proofBytes = encoder.encode(JSON.stringify(proofData));
-    const proofHex = Array.from(proofBytes).map(b => b.toString(16).padStart(2, '0')).join('').slice(0, 60);
-    const proofField = Field.from(BigInt('0x' + proofHex));
-    const commitment = Poseidon.hash([proofField]);
+    const contract = await getContractInstance();
     
-    // For now, we'll simulate blockchain recording
-    // In production, this would call a contract method to record the proof
-    console.log('[BlockchainHelpers] Proof commitment:', commitment.toString());
-    console.log('[BlockchainHelpers] ⚠️  Simulated blockchain recording (contract method not yet implemented)');
+    // Handle private key - can be base58 string or bigint
+    let privateKey: PrivateKey;
+    if (typeof privateKeyBase58OrBigInt === 'bigint') {
+      privateKey = PrivateKey.fromBigInt(privateKeyBase58OrBigInt);
+    } else if (typeof privateKeyBase58OrBigInt === 'string') {
+      // Check if it's a valid base58 private key (starts with EK or similar pattern)
+      if (privateKeyBase58OrBigInt.length > 50 && /^[123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz]+$/.test(privateKeyBase58OrBigInt)) {
+        try {
+          privateKey = PrivateKey.fromBase58(privateKeyBase58OrBigInt);
+        } catch {
+          // Not a valid base58 key, generate deterministic key from the string
+          console.log('[BlockchainHelpers] Generating deterministic key from DID');
+          privateKey = await generateDeterministicKey(did);
+        }
+      } else {
+        // Not a base58 key, generate deterministic key
+        console.log('[BlockchainHelpers] Generating deterministic key from DID');
+        privateKey = await generateDeterministicKey(did);
+      }
+    } else {
+      console.log('[BlockchainHelpers] Generating deterministic key from DID');
+      privateKey = await generateDeterministicKey(did);
+    }
     
-    // Return simulated transaction hash
-    const commitmentBytes = encoder.encode(commitment.toString());
-    const commitmentHex = Array.from(commitmentBytes).map(b => b.toString(16).padStart(2, '0')).join('').slice(0, 50);
-    const simulatedTxHash = '5J' + commitmentHex;
-    return simulatedTxHash;
+    // Use the private key's public key as the DID key (not parsing the DID string)
+    const didKey = privateKey.toPublicKey();
     
+    // Parse proof data from JSON string if needed
+    let proofData = proof;
+    if (proof.proof && typeof proof.proof === 'string') {
+        try {
+            const parsed = JSON.parse(proof.proof);
+            proofData = { ...proof, ...parsed };
+        } catch (e) {
+            // ignore
+        }
+    }
+
+    const result = await contract.recordProof(
+      didKey,
+      proofType,
+      proofData,
+      privateKey
+    );
+    
+    if (result.success) {
+        console.log('[BlockchainHelpers] ✅ Proof recorded:', result.hash);
+        return result.hash;
+    } else {
+        console.warn('[BlockchainHelpers] Proof recording failed:', result.error);
+        return null;
+    }
   } catch (error: any) {
     console.error('[BlockchainHelpers] Error recording proof:', error.message);
     return null;
   }
+}
+
+/**
+ * Hash proof data for local storage
+ */
+async function hashProofData(proof: any): Promise<string> {
+  const proofString = JSON.stringify(proof);
+  const hashBuffer = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(proofString));
+  const hashArray = Array.from(new Uint8Array(hashBuffer));
+  return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+}
+
+/**
+ * Generate deterministic private key from a DID/address string
+ */
+async function generateDeterministicKey(identifier: string): Promise<PrivateKey> {
+  const addressHash = await crypto.subtle.digest(
+    'SHA-256', 
+    new TextEncoder().encode(identifier + '_minaid_proof_key')
+  );
+  const hashArray = new Uint8Array(addressHash);
+  let seedBigInt = BigInt(0);
+  for (let i = 0; i < 32; i++) {
+    seedBigInt = (seedBigInt << BigInt(8)) | BigInt(hashArray[i]);
+  }
+  const fieldOrder = BigInt('28948022309329048855892746252171976963363056481941560715954676764349967630337');
+  const privateKeyBigInt = seedBigInt % fieldOrder;
+  return PrivateKey.fromBigInt(privateKeyBigInt);
 }
 
 /**

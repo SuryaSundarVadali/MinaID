@@ -8,6 +8,7 @@
 
 import React, { useState } from 'react';
 import QRCode from 'qrcode';
+import { bufferToBase64 } from '@/lib/CryptoUtils';
 
 type ProofType = 'age' | 'kyc' | 'composite';
 
@@ -49,7 +50,8 @@ export function ProofRequestCard() {
 
       // Generate shareable URL
       const baseUrl = window.location.origin;
-      const requestUrlStr = `${baseUrl}/respond?request=${btoa(JSON.stringify(request))}`;
+      const requestData = new TextEncoder().encode(JSON.stringify(request));
+      const requestUrlStr = `${baseUrl}/respond?request=${bufferToBase64(requestData)}`;
       setRequestUrl(requestUrlStr);
 
       // Generate QR code

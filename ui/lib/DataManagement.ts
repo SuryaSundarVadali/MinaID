@@ -16,6 +16,9 @@
  * - Aadhar data
  * - Proofs
  * - Session data
+ * - Merkle tree state
+ * - Encrypted keys
+ * - Transaction records
  */
 export function clearAllData(): void {
   console.log('[DataManagement] Clearing all MinaID data...');
@@ -29,9 +32,13 @@ export function clearAllData(): void {
       key.startsWith('minaid') ||
       key.startsWith('aadhar_') ||
       key.startsWith('proof_') ||
+      key.startsWith('encrypted_') ||
       key.includes('wallet') ||
       key.includes('session') ||
-      key.includes('did')
+      key.includes('did') ||
+      key.includes('merkle') ||
+      key.includes('passkey') ||
+      key.includes('private_key')
     )) {
       keysToRemove.push(key);
     }
@@ -43,7 +50,20 @@ export function clearAllData(): void {
     localStorage.removeItem(key);
   });
   
-  console.log(`[DataManagement] ✓ Cleared ${keysToRemove.length} items`);
+  // Reset the in-memory MerkleMap state
+  try {
+    // Dynamic import to avoid circular dependency
+    import('./BlockchainHelpers').then(({ resetMerkleMapState }) => {
+      resetMerkleMapState();
+    }).catch(() => {
+      // If import fails, just remove the key directly
+      localStorage.removeItem('minaid_merkle_map_keys');
+    });
+  } catch (e) {
+    localStorage.removeItem('minaid_merkle_map_keys');
+  }
+  
+  console.log(`[DataManagement] ✓ Cleared ${keysToRemove.length} items (including Merkle tree state)`);
 }
 
 /**

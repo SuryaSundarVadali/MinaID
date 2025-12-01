@@ -1,16 +1,15 @@
 import { Mina, PublicKey, fetchAccount, Field, MerkleWitness, Poseidon } from 'o1js';
 import * as Comlink from "comlink";
-
-// Note: These types are placeholders since contracts aren't used in Web Worker currently
-type DIDRegistry = any;
-type ZKPVerifier = any;
+import { DIDRegistry } from '@contracts/DIDRegistry';
+import { ZKPVerifier } from '@contracts/ZKPVerifier';
+import { AgeVerificationProgram } from '@contracts/AgeVerificationProgram';
 
 type Transaction = Awaited<ReturnType<typeof Mina.transaction>>;
 
 const state = {
-  DIDRegistryInstance: null as any,
-  ZKPVerifierInstance: null as any,
-  AgeVerificationProgramInstance: null as any,
+  DIDRegistryInstance: DIDRegistry,
+  ZKPVerifierInstance: ZKPVerifier,
+  AgeVerificationProgramInstance: AgeVerificationProgram,
   didRegistryContract: null as null | DIDRegistry,
   zkpVerifierContract: null as null | ZKPVerifier,
   transaction: null as null | Transaction
@@ -36,30 +35,27 @@ export const api = {
   },
 
   async loadContracts() {
-    // Note: Contract loading disabled - contracts not available in web worker context
-    // In production, use ContractInterface instead
-    console.log("Contract loading skipped - using ContractInterface instead");
-    // Placeholder instances
-    state.DIDRegistryInstance = null;
-    state.ZKPVerifierInstance = null;
-    state.AgeVerificationProgramInstance = null;
+    console.log("Loading contracts in worker...");
+    state.DIDRegistryInstance = DIDRegistry;
+    state.ZKPVerifierInstance = ZKPVerifier;
+    state.AgeVerificationProgramInstance = AgeVerificationProgram;
   },
 
   async compileAgeVerificationProgram() {
     console.log("Compiling AgeVerificationProgram...");
-    await state.AgeVerificationProgramInstance!.compile();
+    await state.AgeVerificationProgramInstance.compile();
     console.log("AgeVerificationProgram compiled");
   },
 
   async compileDIDRegistry() {
     console.log("Compiling DIDRegistry contract...");
-    await state.DIDRegistryInstance!.compile();
+    await state.DIDRegistryInstance.compile();
     console.log("DIDRegistry contract compiled");
   },
 
   async compileZKPVerifier() {
     console.log("Compiling ZKPVerifier contract...");
-    await state.ZKPVerifierInstance!.compile();
+    await state.ZKPVerifierInstance.compile();
     console.log("ZKPVerifier contract compiled");
   },
 

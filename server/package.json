@@ -1,0 +1,27 @@
+{
+  "name": "minaid-websocket-server",
+  "version": "1.0.0",
+  "description": "WebSocket server for MinaID real-time communication",
+  "main": "websocket-server.js",
+  "scripts": {
+    "start": "node websocket-server.js",
+    "dev": "nodemon websocket-server.js"
+  },
+  "keywords": [
+    "websocket",
+    "minaid",
+    "real-time",
+    "mina-protocol"
+  ],
+  "author": "MinaID Team",
+  "license": "MIT",
+  "dependencies": {
+    "ws": "^8.14.2"
+  },
+  "devDependencies": {
+    "nodemon": "^3.0.1"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}

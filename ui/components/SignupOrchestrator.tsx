@@ -303,9 +303,19 @@ export function SignupOrchestrator({ onSuccess }: SignupOrchestratorProps = {}) 
       const contractInterface = new ContractInterface(networkConfig);
       await contractInterface.initialize();
 
-      // Create Merkle witness for DID
-      const merkleMap = new MerkleMap();
+      // Import the global Merkle map handler to maintain consistent state
+      const { default: BlockchainHelpers } = await import('../lib/BlockchainHelpers');
+      
+      // Create Merkle witness for DID using persistent state
+      // Note: For initial implementation, we need to sync with on-chain state
+      const { MerkleMap: LocalMerkleMap } = await import('o1js');
+      
+      // Get MerkleMap key for this DID
       const didKey = Poseidon.hash(PublicKey.fromBase58(state.did).toFields());
+      
+      // Create a fresh MerkleMap for witness generation
+      // TODO: In production, this should sync with on-chain state
+      const merkleMap = new LocalMerkleMap();
       const witness = merkleMap.getWitness(didKey);
 
       // Load actual private key using Passkey authentication

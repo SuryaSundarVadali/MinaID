@@ -58,6 +58,11 @@ interface GenerationState {
     proofType: ProofType;
     minimumAge?: number;
     timestamp: number;
+    selectiveDisclosure?: {
+      name: { commitment: string; signature: string; attributeName: string };
+      citizenship: { commitment: string; signature: string; normalizedValue: string };
+      salt: string;
+    };
   };
 }
 
@@ -182,32 +187,72 @@ export default function DIDProofGenerator({ proofType = 'citizenship' }: DIDProo
     }));
 
     try {
-      // Step 1: Load private key with Passkey
+      // Step 1: Get private key - either from stored key or generate for Auro wallet users
       setState(prev => ({ 
         ...prev, 
         progress: 20,
-        statusMessage: 'Authenticating with passkey...'
+        statusMessage: 'Authenticating...'
       }));
       
       console.log('[DIDProofGenerator] Loading private key for:', walletType, session.did);
       
-      let privateKeyString: string;
-      try {
-        privateKeyString = await loadPrivateKey(walletType, passkeyId, session.did);
-      } catch (keyError: any) {
-        console.error('[DIDProofGenerator] Failed to load private key:', keyError);
-        
-        // If no private key found, user needs to re-register with the new passkey system
-        if (keyError.message?.includes('No stored private key')) {
-          throw new Error(
-            'Your account was created before the passkey security system was implemented. ' +
-            'Please sign out and create a new account to use the secure proof generation feature.'
-          );
-        }
-        throw keyError;
-      }
+      let privateKey: PrivateKey;
       
-      const privateKey = PrivateKey.fromBase58(privateKeyString);
+      // Check if user is using Auro wallet with simple signup (no stored private key)
+      const walletData = localStorage.getItem('minaid_wallet_connected');
+      const isSimpleSignup = walletData && JSON.parse(walletData).simpleSignup === true;
+      
+      if (isSimpleSignup || walletType === 'auro') {
+        // For Auro wallet users without stored keys, generate a deterministic key from wallet address
+        // This ensures consistent key generation for the same wallet address
+        console.log('[DIDProofGenerator] Using Auro wallet mode - generating deterministic key from address');
+        
+        try {
+          // First try to load stored key (if they did full signup)
+          const privateKeyString = await loadPrivateKey(walletType, passkeyId, session.did);
+          privateKey = PrivateKey.fromBase58(privateKeyString);
+        } catch (keyError: any) {
+          // No stored key - generate deterministic key for proof generation
+          // Note: This is for development/testing. In production, you'd want proper key management.
+          console.log('[DIDProofGenerator] No stored key, using wallet-derived approach');
+          
+          // Generate a deterministic private key from the wallet address hash
+          // This allows proof generation without storing private keys
+          const addressHash = await crypto.subtle.digest(
+            'SHA-256', 
+            new TextEncoder().encode(userIdentifier + '_minaid_proof_key')
+          );
+          const hashArray = new Uint8Array(addressHash);
+          // Take first 32 bytes and create a Field-compatible bigint
+          let seedBigInt = BigInt(0);
+          for (let i = 0; i < 32; i++) {
+            seedBigInt = (seedBigInt << BigInt(8)) | BigInt(hashArray[i]);
+          }
+          // Mod by field order to ensure valid private key
+          const fieldOrder = BigInt('28948022309329048855892746252171976963363056481941560715954676764349967630337');
+          const privateKeyBigInt = seedBigInt % fieldOrder;
+          
+          // Create private key from the seed
+          privateKey = PrivateKey.fromBigInt(privateKeyBigInt);
+          console.log('[DIDProofGenerator] Generated deterministic key for wallet:', userIdentifier);
+        }
+      } else {
+        // Standard flow - load from secure storage
+        try {
+          const privateKeyString = await loadPrivateKey(walletType, passkeyId, session.did);
+          privateKey = PrivateKey.fromBase58(privateKeyString);
+        } catch (keyError: any) {
+          console.error('[DIDProofGenerator] Failed to load private key:', keyError);
+          
+          if (keyError.message?.includes('No stored private key')) {
+            throw new Error(
+              'Your account was created before the passkey security system was implemented. ' +
+              'Please sign out and create a new account to use the secure proof generation feature.'
+            );
+          }
+          throw keyError;
+        }
+      }
 
       // Step 2: Load Aadhar data from localStorage
       setState(prev => ({ 
@@ -250,11 +295,26 @@ export default function DIDProofGenerator({ proofType = 'citizenship' }: DIDProo
         issuer: 'UIDAI' as const
       };
 
-      const proof = await generateAgeProof(
-        aadharDataObj,
-        minimumAge,
-        privateKey
-      );
+      // Generate proof based on type - citizenship uses KYC proof, others use age proof
+      let proof: any;
+      if (proofType === 'citizenship') {
+        // Citizenship proofs use KYC verification (no age requirement)
+        const { generateKYCProof } = await import('../../lib/ProofGenerator');
+        proof = await generateKYCProof(
+          aadharDataObj,
+          privateKey,
+          ['citizenship', 'name']
+        );
+        console.log('[DID Proof Gen] Generated KYC proof for citizenship verification');
+      } else {
+        // Age proofs (age18, age21)
+        proof = await generateAgeProof(
+          aadharDataObj,
+          minimumAge,
+          privateKey
+        );
+        console.log('[DID Proof Gen] Generated age proof with minimumAge:', minimumAge);
+      }
 
       // Generate selective disclosure commitments for name and citizenship
       const { generateSelectiveDisclosureProof, generateCitizenshipZKProof } = await import('../../lib/ProofGenerator');
@@ -320,7 +380,7 @@ export default function DIDProofGenerator({ proofType = 'citizenship' }: DIDProo
         did: session?.did || userIdentifier,
         proofType,
         minimumAge: minimumAge > 0 ? minimumAge : undefined,
-        timestamp: Date.now()
+        timestamp: proof.timestamp  // Use the SAME timestamp that was used in commitment computation
       };
 
       // Step 5: Record proof on blockchain (non-blocking)
@@ -389,6 +449,7 @@ export default function DIDProofGenerator({ proofType = 'citizenship' }: DIDProo
 
     try {
       // Create downloadable JSON with all necessary verification data
+      // IMPORTANT: Include selectiveDisclosure for credential verification
       const downloadData = {
         version: '1.0',
         type: 'mina-zkp-proof',
@@ -398,6 +459,8 @@ export default function DIDProofGenerator({ proofType = 'citizenship' }: DIDProo
         minimumAge: state.generatedProof.minimumAge,
         proof: state.generatedProof.proof,
         publicOutput: state.generatedProof.publicOutput,
+        // Include selective disclosure for name/citizenship verification
+        selectiveDisclosure: state.generatedProof.selectiveDisclosure,
         metadata: {
           generatedAt: new Date(state.generatedProof.timestamp).toISOString(),
           proofId: state.proofId,
@@ -669,9 +732,10 @@ export default function DIDProofGenerator({ proofType = 'citizenship' }: DIDProo
                 )}
                 {(state.error?.includes('before the passkey') || state.error?.includes('create a new account')) && (
                   <button
-                    onClick={() => {
-                      // Clear old session data
-                      localStorage.clear();
+                    onClick={async () => {
+                      // Clear old session data using proper function
+                      const { clearAllData } = await import('../../lib/DataManagement');
+                      clearAllData();
                       router.push('/signup');
                     }}
                     className="w-full bg-indigo-600 text-white py-3 px-6 rounded-lg hover:bg-indigo-700 transition font-semibold"

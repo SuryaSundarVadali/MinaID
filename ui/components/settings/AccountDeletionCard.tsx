@@ -77,32 +77,17 @@ export function AccountDeletionCard({ session }: AccountDeletionCardProps) {
       // TODO: Call DIDRegistry.revokeDID() contract method
       console.log('[AccountDeletion] DID revoked on-chain');
 
-      // Step 3: Delete encrypted private keys
+      // Step 3: Clear all data using comprehensive function
       setDeletionProgress(50);
       await new Promise(resolve => setTimeout(resolve, 500));
-      localStorage.removeItem(`encrypted_private_key_${session.did}`);
-      console.log('[AccountDeletion] Private keys deleted');
+      
+      // Import and use clearAllData for comprehensive cleanup
+      const { clearAllData } = await import('../../lib/DataManagement');
+      clearAllData();
+      
+      console.log('[AccountDeletion] All data cleared (keys, proofs, merkle state, etc.)');
 
-      // Step 4: Delete all credentials
-      setDeletionProgress(65);
-      await new Promise(resolve => setTimeout(resolve, 500));
-      localStorage.removeItem('minaid_aadhar_data');
-      console.log('[AccountDeletion] Credentials deleted');
-
-      // Step 5: Delete all proofs
-      setDeletionProgress(75);
-      await new Promise(resolve => setTimeout(resolve, 500));
-      localStorage.removeItem('minaid_proofs');
-      console.log('[AccountDeletion] Proofs deleted');
-
-      // Step 6: Delete verification history
-      setDeletionProgress(85);
-      await new Promise(resolve => setTimeout(resolve, 500));
-      localStorage.removeItem('minaid_verification_history');
-      localStorage.removeItem('minaid_proof_requests');
-      console.log('[AccountDeletion] Verification history deleted');
-
-      // Step 7: Delete session
+      // Step 4: Delete session
       setDeletionProgress(95);
       await new Promise(resolve => setTimeout(resolve, 500));
       logout();

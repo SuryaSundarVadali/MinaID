@@ -24,19 +24,19 @@ import {
   Signature,
   MerkleMapWitness,
   Poseidon,
+  Scalar,
 } from 'o1js';
 
-// Contract type definitions
-type DIDRegistry = any;
-type ZKPVerifier = any;
+import { DIDRegistry } from '@contracts/DIDRegistry';
+import { ZKPVerifier } from '@contracts/ZKPVerifier';
 
 // Default configuration for devnet
-const DEFAULT_CONFIG: NetworkConfig = {
+export const DEFAULT_CONFIG: NetworkConfig = {
   networkId: 'devnet',
   minaEndpoint: 'https://api.minascan.io/node/devnet/v1/graphql',
   archiveEndpoint: 'https://api.minascan.io/archive/devnet/v1/graphql',
-  didRegistryAddress: 'B62qjuEhj9YjZyKTD75ywH7vY73DgUTC5bVxSCo3meirg8nGnV3CYjk',
-  zkpVerifierAddress: 'B62qrfTGCDP1KEx1PQa6mWGjV2b8wckbdcQRhi2Mu3AGfRYrjjnnfxW',
+  didRegistryAddress: 'B62qkqG87kYzP2cnLx3a8V9SEbsULCuXzaEwVenRHaRf6fK4wkSGpyM',
+  zkpVerifierAddress: 'B62qkXJxwHpseGa7jSo9TqW9tcuRMT3vNUAAHSBKFmL7XKKAm3cSqPZ',
 };
 
 // Types
@@ -80,6 +80,7 @@ export class ContractInterface {
   private networkConfig: NetworkConfig;
   private didRegistry?: DIDRegistry;
   private zkpVerifier?: ZKPVerifier;
+  private isCompiled = false;
 
   constructor(config: NetworkConfig) {
     this.networkConfig = config;
@@ -102,10 +103,35 @@ export class ContractInterface {
     console.log('[ContractInterface] DIDRegistry:', this.networkConfig.didRegistryAddress);
     console.log('[ContractInterface] ZKPVerifier:', this.networkConfig.zkpVerifierAddress);
     
-    // For now, we'll use simulation mode since contracts need to be imported properly
-    // In production, contracts would be bundled or loaded from a separate package
-    console.log('[ContractInterface] ⚠️  Using simulation mode - contract classes not bundled');
-    console.log('[ContractInterface] ✅ Interface ready (simulation mode)');
+    try {
+      // Instantiate contracts without compiling immediately to prevent UI freezing on load
+      this.didRegistry = new DIDRegistry(PublicKey.fromBase58(this.networkConfig.didRegistryAddress));
+      this.zkpVerifier = new ZKPVerifier(PublicKey.fromBase58(this.networkConfig.zkpVerifierAddress));
+      
+      console.log('[ContractInterface] ✅ Interface ready (Lazy compilation enabled)');
+    } catch (error) {
+      console.error('[ContractInterface] Failed to initialize contracts:', error);
+    }
+  }
+
+  /**
+   * Ensure contracts are compiled before transaction generation
+   */
+  async ensureCompiled() {
+    if (this.isCompiled) return;
+    console.log('[ContractInterface] Compiling contracts... (this may take a minute)');
+    console.time('Contract Compilation');
+    try {
+      await DIDRegistry.compile();
+      await ZKPVerifier.compile();
+      this.isCompiled = true;
+      console.log('[ContractInterface] Contracts compiled successfully');
+    } catch (error) {
+      console.error('[ContractInterface] Compilation failed:', error);
+      throw error;
+    } finally {
+      console.timeEnd('Contract Compilation');
+    }
   }
 
   /**
@@ -119,30 +145,23 @@ export class ContractInterface {
   async registerDID(
     did: PublicKey,
     documentHash: Field,
-    privateKey: PrivateKey,
+    privateKey: PrivateKey | null,
     merkleWitness: MerkleMapWitness
   ): Promise<TransactionResult> {
     try {
+      // Ensure contracts are compiled
+      await this.ensureCompiled();
+
       // Try to fetch account, but don't fail if it doesn't exist yet
       console.log('Checking account for DID:', did.toBase58());
       try {
         const accountInfo = await fetchAccount({ publicKey: did });
         if (accountInfo.error) {
           console.warn('Account not found on chain - it needs to be funded first');
-          // For testnet/devnet, the account needs to receive funds from a faucet
-          return {
-            hash: '',
-            success: false,
-            error: 'Account not funded. Please fund your account with MINA tokens from the faucet: https://faucet.minaprotocol.com/',
-          };
+          console.warn(`Please fund the DID address: ${did.toBase58()}`);
         }
       } catch (fetchError: any) {
         console.warn('Account fetch failed:', fetchError.message);
-        return {
-          hash: '',
-          success: false,
-          error: 'Account not found on blockchain. Please fund your account first from: https://faucet.minaprotocol.com/',
-        };
       }
 
       // Fetch contract account
@@ -150,54 +169,140 @@ export class ContractInterface {
       try {
         await fetchAccount({ publicKey: contractAddress });
       } catch (contractError: any) {
-        console.warn('Contract not deployed yet:', contractError.message);
-        // For development, simulate successful registration
-        console.log('Simulating DID registration for development...');
+        console.error('DIDRegistry contract not deployed:', contractError.message);
         return {
-          hash: 'simulated-' + Date.now(),
-          success: true,
-          events: [],
+          hash: '',
+          success: false,
+          error: 'DIDRegistry contract not deployed. Please deploy the contract first.',
         };
       }
 
       console.log('Creating transaction for DID registration...');
 
-      // Create transaction (no nested transactions!)
-      const tx = await Mina.transaction(
-        { sender: did, fee: 100_000_000 }, // 0.1 MINA fee
-        async () => {
-          // Call registerDID method
-          // await this.didRegistry!.registerDID(did, documentHash, merkleWitness, signature);
+      // If privateKey is null, use wallet provider
+      if (!privateKey) {
+        if (typeof window !== 'undefined' && (window as any).mina) {
+          console.log('Using Auro Wallet for signing...');
           
-          // Placeholder for now - contract not yet instantiated
-          console.log('Registering DID:', did.toBase58());
-          console.log('Document hash:', documentHash.toString());
-          console.log('Contract address:', contractAddress.toBase58());
+          // 1. Sign fields
+          console.log('Requesting signature from wallet...');
+          const signResult = await (window as any).mina.signFields({
+            message: [documentHash.toString()]
+          });
+          
+          console.log('Wallet sign result:', JSON.stringify(signResult));
+
+          let signature: Signature;
+
+          // Handle different signature formats returned by wallet
+          if (signResult?.signature && typeof signResult.signature === 'object' && 'field' in signResult.signature && 'scalar' in signResult.signature) {
+            // Standard object format: { field: string, scalar: string }
+            signature = Signature.fromObject({
+              r: Field(signResult.signature.field),
+              s: Scalar.from(signResult.signature.scalar)
+            });
+          } else if (typeof signResult?.signature === 'string') {
+            // String format (Base58)
+            try {
+              signature = Signature.fromBase58(signResult.signature);
+            } catch (e) {
+              throw new Error(`Failed to parse signature string: ${signResult.signature}`);
+            }
+          } else {
+            throw new Error(`Invalid signature response from wallet: ${JSON.stringify(signResult)}`);
+          }
+
+          // 2. Build transaction
+
+          // 2. Build transaction
+          const tx = await Mina.transaction(
+            { sender: did, fee: 100_000_000 }, 
+            async () => {
+              if (this.didRegistry) {
+                await this.didRegistry.registerDID(did, documentHash, merkleWitness, signature);
+              } else {
+                throw new Error('DIDRegistry contract not initialized');
+              }
+            }
+          );
+
+          console.log('Proving transaction...');
+          await tx.prove();
+
+          console.log('Sending transaction via wallet...');
+          const { hash } = await (window as any).mina.sendTransaction({
+            transaction: tx.toJSON(),
+            feePayer: {
+              fee: 0.1,
+              memo: ''
+            }
+          });
+
+          return {
+            hash,
+            success: true,
+            events: []
+          };
+        } else {
+          throw new Error('No private key provided and Auro Wallet not found');
         }
-      );
-
-      console.log('Proving transaction...');
-      await tx.prove();
-      
-      console.log('Signing transaction...');
-      await tx.sign([privateKey]);
-
-      console.log('Sending transaction...');
-      const pendingTx = await tx.send();
-      
-      console.log('Transaction sent! Hash:', pendingTx.hash);
-
-      // Wait for confirmation
-      if (pendingTx.status === 'pending') {
-        console.log('Waiting for transaction confirmation...');
-        await pendingTx.wait();
       }
 
-      return {
-        hash: pendingTx.hash || '',
-        success: true,
-        events: [], // Extract events from transaction
-      };
+      try {
+        // Create transaction (no nested transactions!)
+        const tx = await Mina.transaction(
+          { sender: did, fee: 100_000_000 }, // 0.1 MINA fee
+          async () => {
+            // Create signature
+            // The signature must verify against the userPublicKey and [didDocumentHash]
+            // In the contract: validSignature.verify(userPublicKey, [didDocumentHash])
+            const signature = Signature.create(privateKey, [documentHash]);
+            
+            // Call registerDID method
+            if (this.didRegistry) {
+              await this.didRegistry.registerDID(did, documentHash, merkleWitness, signature);
+            } else {
+              throw new Error('DIDRegistry contract not initialized');
+            }
+          }
+        );
+
+        console.log('Proving transaction...');
+        await tx.prove();
+        
+        console.log('Signing transaction...');
+        await tx.sign([privateKey]);
+
+        console.log('Sending transaction...');
+        const pendingTx = await tx.send();
+        
+        console.log('Transaction sent! Hash:', pendingTx.hash);
+
+        // Wait for confirmation
+        if (pendingTx.status === 'pending') {
+          console.log('Waiting for transaction confirmation...');
+          await pendingTx.wait();
+        }
+
+        return {
+          hash: pendingTx.hash || '',
+          success: true,
+          events: [], // Extract events from transaction
+        };
+      } catch (txError: any) {
+        console.error('Transaction failed:', txError.message);
+        
+        // Provide helpful error for funding issues
+        if (txError.message.includes('funds') || txError.message.includes('balance') || txError.message.includes('Account')) {
+          return {
+            hash: '',
+            success: false,
+            error: 'Account not funded. Please get MINA tokens from: https://faucet.minaprotocol.com/',
+          };
+        }
+        
+        throw txError;
+      }
     } catch (error: any) {
       console.error('DID registration failed:', error);
       
@@ -211,6 +316,97 @@ export class ContractInterface {
         hash: '',
         success: false,
         error: errorMessage,
+      };
+    }
+  }
+
+  /**
+   * Record a proof on-chain
+   * @param did User's DID
+   * @param proofType Type of proof (age, kyc, citizenship)
+   * @param proofData Proof data
+   * @param privateKey User's private key
+   */
+  async recordProof(
+    did: PublicKey,
+    proofType: string,
+    proofData: any,
+    privateKey: PrivateKey
+  ): Promise<TransactionResult> {
+    try {
+      console.log(`Recording ${proofType} proof for DID:`, did.toBase58());
+      
+      // Ensure contracts are compiled
+      await this.ensureCompiled();
+      
+      if (!this.zkpVerifier) {
+        throw new Error('ZKPVerifier contract not initialized');
+      }
+
+      // Check if account exists/is funded
+      await fetchAccount({ publicKey: did });
+
+      const tx = await Mina.transaction({ sender: did, fee: 100_000_000 }, async () => {
+        if (proofType.startsWith('age')) {
+          // Parse proof data
+          // proofData should contain: ageHash, proof (commitment), issuerPublicKey, timestamp
+          // Note: ageHash comes from the parsed JSON in proofData
+          const ageHash = Field.from(proofData.ageHash || 0); 
+          const proof = Field.from(proofData.publicOutput);
+          const issuerPublicKey = did; // Self-attested for now
+          const timestamp = Field.from(proofData.timestamp);
+          
+          await this.zkpVerifier!.verifyAgeProof(
+            did,
+            ageHash,
+            proof,
+            issuerPublicKey,
+            timestamp
+          );
+        } else if (proofType === 'kyc') {
+          // KYC verification
+          const kycHash = Field.from(proofData.kycHash || 0);
+          const proof = Field.from(proofData.publicOutput); // This is the commitment
+          const issuerPublicKey = did; // Self-attested
+          
+          await this.zkpVerifier!.verifyKYCProof(
+            did,
+            kycHash,
+            proof,
+            issuerPublicKey
+          );
+        } else if (proofType === 'citizenship') {
+          // Citizenship proof not yet supported in ZKPVerifier contract
+          throw new Error('Citizenship proof verification is not supported on-chain yet. Please use age or kyc proof types.');
+        } else {
+          throw new Error(`Unsupported proof type: ${proofType}`);
+        }
+      });
+
+      console.log('Proving proof transaction...');
+      await tx.prove();
+      
+      console.log('Signing proof transaction...');
+      await tx.sign([privateKey]);
+
+      console.log('Sending proof transaction...');
+      const pendingTx = await tx.send();
+      
+      if (pendingTx.status === 'pending') {
+        await pendingTx.wait();
+      }
+
+      return {
+        hash: pendingTx.hash,
+        success: true,
+        events: [],
+      };
+    } catch (error: any) {
+      console.error('Proof recording failed:', error);
+      return {
+        hash: '',
+        success: false,
+        error: error.message || 'Proof recording failed',
       };
     }
   }
@@ -258,11 +454,22 @@ export class ContractInterface {
     merkleWitness: MerkleMapWitness
   ): Promise<TransactionResult> {
     try {
+      // Ensure contracts are compiled
+      await this.ensureCompiled();
+
       await fetchAccount({ publicKey: did });
 
       const tx = await Mina.transaction({ sender: did }, async () => {
-        // await this.didRegistry!.revokeDID(did, merkleWitness);
-        console.log('Revoking DID:', did.toBase58());
+        // Create signature for revocation
+        // Contract expects signature of Poseidon.hash(did.toFields())
+        const key = Poseidon.hash(did.toFields());
+        const signature = Signature.create(privateKey, [key]);
+        
+        if (this.didRegistry) {
+          await this.didRegistry.revokeDID(did, merkleWitness, signature);
+        } else {
+          throw new Error('DIDRegistry contract not initialized');
+        }
       });
 
       await tx.prove();
@@ -291,24 +498,30 @@ export class ContractInterface {
    * @param did DID to update
    * @param newDocumentHash New document hash
    * @param privateKey Owner's private key
-   * @param oldWitness Merkle witness for current state
-   * @param newWitness Merkle witness for new state
+   * @param witness Merkle witness for current state
    * @returns Transaction result
    */
   async updateDID(
     did: PublicKey,
     newDocumentHash: Field,
     privateKey: PrivateKey,
-    oldWitness: MerkleMapWitness,
-    newWitness: MerkleMapWitness
+    witness: MerkleMapWitness
   ): Promise<TransactionResult> {
     try {
+      // Ensure contracts are compiled
+      await this.ensureCompiled();
+
       await fetchAccount({ publicKey: did });
 
       const tx = await Mina.transaction({ sender: did }, async () => {
-        // await this.didRegistry!.updateDID(did, newDocumentHash, oldWitness, newWitness);
-        console.log('Updating DID:', did.toBase58());
-        console.log('New document hash:', newDocumentHash.toString());
+        // Create signature for update
+        const signature = Signature.create(privateKey, [newDocumentHash]);
+        
+        if (this.didRegistry) {
+          await this.didRegistry.updateDID(did, newDocumentHash, witness, signature);
+        } else {
+          throw new Error('DIDRegistry contract not initialized');
+        }
       });
 
       await tx.prove();
@@ -344,7 +557,11 @@ export class ContractInterface {
     proofData: any,
     verifierPrivateKeyBase58: string
   ): Promise<TransactionResult> {
+    console.log('[ContractInterface] *** verifyProofOnChain v2 - UPDATED CODE ***');
     try {
+      // Ensure contracts are compiled
+      await this.ensureCompiled();
+
       if (!this.zkpVerifier) {
         await this.initialize();
       }
@@ -356,8 +573,6 @@ export class ContractInterface {
       console.log('[ContractInterface] Verifier:', verifier.toBase58());
       console.log('[ContractInterface] Proof Type:', proofData.proofType);
 
-      // Extract proof details
-      const subject = PublicKey.fromBase58(proofData.did.replace('did:mina:', ''));
       const proofType = proofData.proofType;
       
       // Parse the proof data (it's a JSON string)
@@ -370,66 +585,135 @@ export class ContractInterface {
         parsedProof = proofData.proof;
       }
 
-      // Create commitment field from proof
-      const commitment = Field.from(parsedProof.commitment || proofData.publicOutput);
+      // Extract subject from proof's publicKey field (the key that was used to create the commitment)
+      // This is important because for Auro wallet users, the proof uses a deterministic key
+      // that may differ from the wallet address in the DID
+      let subject: PublicKey;
+      if (parsedProof.publicKey) {
+        // Use the public key that was used during proof generation
+        subject = PublicKey.fromBase58(parsedProof.publicKey);
+        console.log('[ContractInterface] Using proof publicKey for subject:', subject.toBase58());
+      } else {
+        // Fallback to DID-based public key
+        subject = PublicKey.fromBase58(proofData.did.replace('did:mina:', ''));
+        console.log('[ContractInterface] Using DID for subject:', subject.toBase58());
+      }
+
+      // Create commitment field from proof - must use Field() for string decimal values
+      const commitment = Field(parsedProof.commitment || proofData.publicOutput);
       
-      // Create issuer key (for now, use the subject as issuer)
+      // Create issuer key (for now, use the subject as issuer - self-attested)
       const issuer = subject;
       
       // Create timestamp field
-      const timestamp = Field.from(proofData.timestamp);
+      const timestamp = Field(proofData.timestamp);
+
+      // Debug: Log all the values being used
+      console.log('[ContractInterface] Verification parameters:');
+      console.log('  Subject:', subject.toBase58());
+      console.log('  Subject fields:', subject.toFields().map(f => f.toString()));
+      console.log('  Issuer:', issuer.toBase58());
+      console.log('  Issuer fields:', issuer.toFields().map(f => f.toString()));
+      console.log('  kycHash from proof (raw):', parsedProof.kycHash);
+      console.log('  Commitment from proof:', commitment.toString());
+      
+      // Recompute what the contract will compute to debug
+      // Use Field() constructor for string decimal representation
+      const kycHashField = Field(parsedProof.kycHash || '0');
+      console.log('  kycHash as Field:', kycHashField.toString());
+      
+      const recomputedCommitment = Poseidon.hash([
+        kycHashField,
+        ...subject.toFields(),
+        ...issuer.toFields(),
+        Field(1)
+      ]);
+      console.log('  Recomputed commitment:', recomputedCommitment.toString());
+      console.log('  Match:', commitment.toString() === recomputedCommitment.toString());
 
       console.log('[ContractInterface] Creating verification transaction...');
 
       // Check if contracts are actually deployed
       const contractAddress = PublicKey.fromBase58(this.networkConfig.zkpVerifierAddress);
       let isContractDeployed = false;
+      let contractMinAgeValue: bigint | undefined;
       
       try {
-        await fetchAccount({ publicKey: contractAddress });
+        const accountResult = await fetchAccount({ publicKey: contractAddress });
+        console.log('[ContractInterface] Contract account fetch result:', accountResult);
         isContractDeployed = true;
+        
+        // Read the contract's actual minimumAge state
+        if (this.zkpVerifier) {
+          const contractMinAge = this.zkpVerifier.minimumAge.get();
+          contractMinAgeValue = contractMinAge?.toBigInt();
+          console.log('[ContractInterface] Contract minimumAge state:', contractMinAgeValue?.toString() || 'undefined');
+          
+          // Warn if minimumAge is not 18
+          if (contractMinAgeValue !== 18n) {
+            console.warn('[ContractInterface] ⚠️ Contract minimumAge is NOT 18! Value:', contractMinAgeValue?.toString());
+            console.warn('[ContractInterface] ⚠️ Proof was generated with minimumAge=18, but contract has different value!');
+          }
+        }
       } catch (error) {
-        console.warn('[ContractInterface] Contract not deployed or accessible, using simulation mode');
+        console.error('[ContractInterface] ❌ Contract not deployed or accessible:', error);
         isContractDeployed = false;
       }
 
-      // If contracts are not deployed, simulate verification
+      // If contracts are not deployed, return failure (no simulation)
       if (!isContractDeployed || !this.zkpVerifier) {
-        console.log('[ContractInterface] ⚠️  Simulating proof verification...');
-        
-        // In simulation mode, we consider the proof valid if:
-        // 1. It has a valid structure (already validated)
-        // 2. It has a valid commitment/publicOutput
-        // 3. It has proper signatures (we'll trust the proof field)
-        
-        const isValid = !!(commitment && parsedProof && proofData.proof);
-        
-        if (isValid) {
-          console.log('[ContractInterface] ✅ Simulated verification passed');
-          return {
-            hash: 'simulated-verify-' + Date.now(),
-            success: true,
-            events: [],
-            explorerUrl: '#simulation-mode',
-          };
-        } else {
-          console.log('[ContractInterface] ❌ Simulated verification failed - invalid proof structure');
-          return {
-            hash: '',
-            success: false,
-            error: 'Invalid proof structure',
-          };
-        }
+        console.error('[ContractInterface] ❌ Cannot verify proof - contract not deployed or not initialized');
+        return {
+          hash: '',
+          success: false,
+          error: 'ZKPVerifier contract not deployed or not accessible. On-chain verification requires a deployed contract.',
+        };
       }
 
       // Create and send transaction based on proof type
+      // Debug: Log proof routing decision parameters
+      console.log('[ContractInterface] Proof Routing Decision:');
+      console.log('  proofType:', proofType);
+      console.log('  parsedProof.ageHash:', parsedProof.ageHash);
+      console.log('  parsedProof.kycHash:', parsedProof.kycHash);
+      console.log('  Is age18 or age21:', proofType === 'age18' || proofType === 'age21');
+      console.log('  ageHash defined:', parsedProof.ageHash !== undefined);
+      
       const tx = await Mina.transaction(
         { sender: verifier, fee: 100_000_000 }, // 0.1 MINA fee
         async () => {
-          if (proofType === 'age18' || proofType === 'age21') {
-            // Age verification
-            const ageHash = Field.from(parsedProof.actualAge || 21);
-            const minAge = Field.from(proofData.minimumAge || 18);
+          // Determine if this is an age-type proof based on the proof structure
+          // Age proofs have ageHash, KYC proofs have kycHash
+          // Citizenship proofs should use KYC verification (no age requirement)
+          const isAgeProof = (proofType === 'age18' || proofType === 'age21') &&
+                             parsedProof.ageHash !== undefined;
+          
+          console.log('[ContractInterface] isAgeProof:', isAgeProof);
+          
+          if (isAgeProof) {
+            // Age verification (also used for citizenship proofs)
+            const ageHash = Field(parsedProof.ageHash || '0');
+            
+            // Debug: Log exact values for age proof verification
+            console.log('[ContractInterface] Age proof verification parameters:');
+            console.log('  ageHash:', ageHash.toString());
+            console.log('  subject:', subject.toBase58());
+            console.log('  subject.toFields():', subject.toFields().map(f => f.toString()));
+            console.log('  issuer:', issuer.toBase58());
+            console.log('  issuer.toFields():', issuer.toFields().map(f => f.toString()));
+            console.log('  timestamp:', timestamp.toString());
+            console.log('  commitment (proof):', commitment.toString());
+            
+            // Compute what we expect the contract to compute (minAge = 18)
+            const expectedCommitment = Poseidon.hash([
+              ageHash,
+              Field(18), // Contract's minimumAge
+              ...subject.toFields(),
+              ...issuer.toFields(),
+              timestamp,
+            ]);
+            console.log('  Expected commitment (minAge=18):', expectedCommitment.toString());
+            console.log('  Match:', commitment.toString() === expectedCommitment.toString());
             
             await this.zkpVerifier!.verifyAgeProof(
               subject,
@@ -439,14 +723,12 @@ export class ContractInterface {
               timestamp
             );
             
-            console.log('[ContractInterface] Age proof verification called');
+            console.log('[ContractInterface] Age proof verification called for type:', proofType);
           } else {
-            // KYC/Citizenship verification
-            const kycHash = commitment;
-            
+            // KYC verification - only for proofs with kycHash
             await this.zkpVerifier!.verifyKYCProof(
               subject,
-              kycHash,
+              kycHashField,  // Use the already-computed Field
               commitment,
               issuer
             );

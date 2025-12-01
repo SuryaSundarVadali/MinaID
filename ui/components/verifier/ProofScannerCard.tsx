@@ -42,6 +42,7 @@ export function ProofScannerCard({ onVerificationComplete }: ProofScannerCardPro
   const [expectedName, setExpectedName] = useState('');
   const [expectedCitizenship, setExpectedCitizenship] = useState('');
   const [showCredentialInputs, setShowCredentialInputs] = useState(false);
+  const [detectedProofType, setDetectedProofType] = useState<string>('');
 
   const handleFileUpload = (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
@@ -63,14 +64,55 @@ export function ProofScannerCard({ onVerificationComplete }: ProofScannerCardPro
     reader.onload = (e) => {
       try {
         const content = e.target?.result as string;
-        // Validate it's valid JSON
-        JSON.parse(content);
+        // Validate it's valid JSON and detect proof type
+        const parsed = JSON.parse(content);
         setProofInput(content);
+        
+        // Detect and set proof type for UI feedback
+        const type = parsed.proofType || parsed.type || '';
+        setDetectedProofType(type);
+        
+        // Auto-expand credential inputs for citizenship proofs
+        if (type === 'citizenship') {
+          setShowCredentialInputs(true);
+        }
       } catch (error) {
         alert('Invalid JSON file');
       }
     };
     reader.readAsText(file);
+  };
+  
+  // Handle proof input change and detect proof type
+  const handleProofInputChange = (value: string) => {
+    setProofInput(value);
+    
+    // Try to detect proof type from input
+    try {
+      const parsed = JSON.parse(value);
+      const type = parsed.proofType || parsed.type || '';
+      setDetectedProofType(type);
+      
+      // Auto-expand credential inputs for citizenship proofs
+      if (type === 'citizenship') {
+        setShowCredentialInputs(true);
+      }
+    } catch {
+      // Not valid JSON yet, try base64
+      try {
+        const decoded = atob(value.trim());
+        const parsed = JSON.parse(decoded);
+        const type = parsed.proofType || parsed.type || '';
+        setDetectedProofType(type);
+        
+        if (type === 'citizenship') {
+          setShowCredentialInputs(true);
+        }
+      } catch {
+        // Not parseable yet, that's fine
+        setDetectedProofType('');
+      }
+    }
   };
 
   const handleVerifyProof = async () => {
@@ -129,6 +171,22 @@ export function ProofScannerCard({ onVerificationComplete }: ProofScannerCardPro
       const proofId = proofData.metadata?.proofId || proofData.id || 'unknown';
       const proofType = proofData.proofType || proofData.type || 'unknown';
       const subjectDID = proofData.did || proofData.subjectDID || 'unknown';
+      
+      // For citizenship proofs, BOTH name and citizenship inputs are MANDATORY
+      if (proofType === 'citizenship') {
+        const missingFields = [];
+        if (!expectedName.trim()) missingFields.push('Expected Name');
+        if (!expectedCitizenship.trim()) missingFields.push('Expected Citizenship/Country');
+        
+        if (missingFields.length > 0) {
+          alert(`Citizenship verification requires the following fields to be filled:\n- ${missingFields.join('\n- ')}\n\nPlease expand "Verify Specific Credentials" and enter the required values.`);
+          setShowCredentialInputs(true);
+          setIsVerifying(false);
+          return;
+        }
+      }
+      // Note: Age proofs (age18, age21) do NOT require credential inputs
+      // The proof type itself indicates the minimum age requirement
 
       // Extract selective disclosure proofs if available
       const selectiveDisclosure = proofData.selectiveDisclosure;
@@ -146,15 +204,34 @@ export function ProofScannerCard({ onVerificationComplete }: ProofScannerCardPro
         const salt = selectiveDisclosure.salt;
         let userPublicKey: any = null;
 
-        // Get user's public key from DID
+        // Get user's public key - prefer the one from the proof (used for signing)
+        // over the DID (which may be a wallet address)
         try {
-          const didPublicKey = subjectDID.replace('did:mina:', '');
-          userPublicKey = O1PublicKey.fromBase58(didPublicKey);
+          // First, try to get publicKey from the proof itself
+          let parsedProof;
+          try {
+            parsedProof = typeof proofData.proof === 'string' 
+              ? JSON.parse(proofData.proof)
+              : proofData.proof;
+          } catch (e) {
+            parsedProof = null;
+          }
+          
+          if (parsedProof?.publicKey) {
+            // Use the public key that was used to sign the proof
+            userPublicKey = O1PublicKey.fromBase58(parsedProof.publicKey);
+            console.log('[ProofScanner] Using publicKey from proof:', parsedProof.publicKey);
+          } else {
+            // Fallback to DID-based public key
+            const didPublicKey = subjectDID.replace('did:mina:', '');
+            userPublicKey = O1PublicKey.fromBase58(didPublicKey);
+            console.log('[ProofScanner] Using publicKey from DID:', didPublicKey);
+          }
         } catch (e) {
-          console.warn('Could not parse public key from DID:', e);
+          console.warn('Could not parse public key:', e);
         }
 
-        // Name verification using ZK proof
+        // Name verification using ZK proof (case-insensitive)
         if (expectedName.trim()) {
           credentialVerificationRequested = true;
           
@@ -167,6 +244,12 @@ export function ProofScannerCard({ onVerificationComplete }: ProofScannerCardPro
             credentialVerificationFailed = true;
           } else {
             try {
+              // Log normalization for debugging
+              console.log('[ProofScanner] Name ZK verification (case-insensitive):');
+              console.log('  Input name:', expectedName.trim());
+              console.log('  Normalized (will compare):', expectedName.trim().toLowerCase().replace(/\\s+/g, ' '));
+              console.log('  Name commitment from proof:', selectiveDisclosure.name.commitment);
+              
               const isValid = verifySelectiveDisclosureProof(
                 expectedName.trim(),
                 selectiveDisclosure.name.commitment,
@@ -176,9 +259,12 @@ export function ProofScannerCard({ onVerificationComplete }: ProofScannerCardPro
                 userPublicKey
               );
               
+              console.log('  Verification result:', isValid);
+              console.log('  → Name', isValid ? 'MATCHES ✓' : 'DOES NOT MATCH ✗');
+              
               credentialChecks.name = {
                 expected: expectedName.trim(),
-                actual: isValid ? '✓ ZK Proof Valid' : '✗ ZK Proof Invalid',
+                actual: isValid ? '✓ ZK Proof Valid (Case-Insensitive)' : '✗ ZK Proof Invalid',
                 matches: isValid
               };
               
@@ -344,17 +430,16 @@ export function ProofScannerCard({ onVerificationComplete }: ProofScannerCardPro
             throw new Error(txResult.error || 'Blockchain verification failed');
           }
         } catch (blockchainError: any) {
-          console.error('[ProofScanner] Blockchain verification error:', blockchainError);
-          // Fall back to simulated verification
-          console.log('[ProofScanner] Falling back to simulated verification...');
-          verificationStatus = 'verified'; // Reset status for simulation
-          await new Promise(resolve => setTimeout(resolve, 2000));
+          console.error('[ProofScanner] ❌ Blockchain verification error:', blockchainError);
+          verificationStatus = 'failed';
+          // Store error for display
+          throw new Error(`Blockchain verification failed: ${blockchainError.message}`);
         }
       } else {
-        // Simulate verification (original behavior)
-        console.log('[ProofScanner] ⚠️  Using SIMULATED verification (blockchain disabled)');
-        verificationStatus = 'verified';
-        await new Promise(resolve => setTimeout(resolve, 2000));
+        // Blockchain is disabled - fail with clear message
+        console.error('[ProofScanner] ❌ Blockchain verification is disabled - cannot verify proof');
+        verificationStatus = 'failed';
+        throw new Error('Blockchain verification is disabled. Enable USE_BLOCKCHAIN to verify proofs.');
       }
 
       // Override verification status if credential verification was requested and failed
@@ -507,11 +592,32 @@ export function ProofScannerCard({ onVerificationComplete }: ProofScannerCardPro
                 </label>
                 <textarea
                   value={proofInput}
-                  onChange={(e) => setProofInput(e.target.value)}
+                  onChange={(e) => handleProofInputChange(e.target.value)}
                   placeholder='Paste proof data here (e.g., {"id":"proof_123","type":"age",...})'
                   rows={8}
                   className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 font-mono text-sm"
                 />
+                {/* Detected Proof Type Indicator */}
+                {detectedProofType && (
+                  <div className={`mt-2 p-2 rounded-lg text-sm ${
+                    detectedProofType === 'citizenship' 
+                      ? 'bg-amber-50 border border-amber-200 text-amber-800'
+                      : 'bg-green-50 border border-green-200 text-green-800'
+                  }`}>
+                    <span className="font-medium">Detected Proof Type: </span>
+                    <span className="font-bold">{detectedProofType}</span>
+                    {detectedProofType === 'citizenship' && (
+                      <span className="block mt-1 text-amber-700">
+                        ⚠️ This proof type requires you to enter Expected Name and Expected Citizenship below.
+                      </span>
+                    )}
+                    {(detectedProofType === 'age18' || detectedProofType === 'age21') && (
+                      <span className="block mt-1 text-green-700">
+                        ✓ Age verification - no additional inputs required. The proof type indicates the age requirement.
+                      </span>
+                    )}
+                  </div>
+                )}
               </div>
 
               {/* Credential Verification Section */}
@@ -519,16 +625,28 @@ export function ProofScannerCard({ onVerificationComplete }: ProofScannerCardPro
                 <button
                   onClick={() => setShowCredentialInputs(!showCredentialInputs)}
                   type="button"
-                  className="w-full flex items-center justify-between px-4 py-3 bg-purple-50 border border-purple-200 rounded-lg hover:bg-purple-100 transition-colors"
+                  className={`w-full flex items-center justify-between px-4 py-3 rounded-lg transition-colors ${
+                    detectedProofType === 'citizenship'
+                      ? 'bg-amber-50 border-2 border-amber-400 hover:bg-amber-100'
+                      : 'bg-purple-50 border border-purple-200 hover:bg-purple-100'
+                  }`}
                 >
                   <div className="flex items-center gap-2">
-                    <svg className="w-5 h-5 text-purple-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <svg className={`w-5 h-5 ${detectedProofType === 'citizenship' ? 'text-amber-600' : 'text-purple-600'}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
                     </svg>
-                    <span className="font-medium text-purple-900">Verify Specific Credentials (Optional)</span>
+                    <span className={`font-medium ${detectedProofType === 'citizenship' ? 'text-amber-900' : 'text-purple-900'}`}>
+                      {detectedProofType === 'citizenship' 
+                        ? 'Verify Credentials (REQUIRED for Citizenship)'
+                        : 'Verify Specific Credentials (Optional for Age Proofs)'
+                      }
+                    </span>
+                    {detectedProofType === 'citizenship' && (
+                      <span className="ml-2 px-2 py-0.5 bg-red-500 text-white text-xs font-bold rounded">REQUIRED</span>
+                    )}
                   </div>
                   <svg 
-                    className={`w-5 h-5 text-purple-600 transition-transform ${showCredentialInputs ? 'rotate-180' : ''}`} 
+                    className={`w-5 h-5 transition-transform ${showCredentialInputs ? 'rotate-180' : ''} ${detectedProofType === 'citizenship' ? 'text-amber-600' : 'text-purple-600'}`} 
                     fill="none" 
                     stroke="currentColor" 
                     viewBox="0 0 24 24"
@@ -538,40 +656,76 @@ export function ProofScannerCard({ onVerificationComplete }: ProofScannerCardPro
                 </button>
 
                 {showCredentialInputs && (
-                  <div className="mt-4 p-4 bg-purple-50 border border-purple-200 rounded-lg space-y-4">
-                    <p className="text-sm text-purple-800 mb-3">
-                      <strong>🔐 Zero-Knowledge Verification:</strong> Enter expected values to verify specific claims. 
-                      The system will verify cryptographic commitments without revealing the actual data.
-                    </p>
+                  <div className={`mt-4 p-4 rounded-lg space-y-4 ${
+                    detectedProofType === 'citizenship' 
+                      ? 'bg-amber-50 border-2 border-amber-300' 
+                      : 'bg-purple-50 border border-purple-200'
+                  }`}>
+                    {detectedProofType === 'citizenship' ? (
+                      <div className="p-3 bg-red-50 border border-red-200 rounded-lg mb-3">
+                        <p className="text-sm text-red-800">
+                          <strong>⚠️ Required for Citizenship Verification:</strong> Both Name and Citizenship fields must be filled to verify this proof.
+                        </p>
+                      </div>
+                    ) : (
+                      <p className="text-sm text-purple-800 mb-3">
+                        <strong>🔐 Zero-Knowledge Verification:</strong> Enter expected values to verify specific claims. 
+                        The system will verify cryptographic commitments without revealing the actual data.
+                      </p>
+                    )}
 
                     {/* Name Input */}
                     <div>
                       <label className="block text-sm font-medium text-gray-700 mb-1">
                         Expected Name
+                        {detectedProofType === 'citizenship' && (
+                          <span className="ml-2 text-red-600 font-bold">* Required</span>
+                        )}
                       </label>
                       <input
                         type="text"
                         value={expectedName}
                         onChange={(e) => setExpectedName(e.target.value)}
                         placeholder="e.g., John Doe"
-                        className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-purple-500"
+                        className={`w-full px-3 py-2 border rounded-lg focus:ring-2 ${
+                          detectedProofType === 'citizenship' && !expectedName.trim()
+                            ? 'border-red-400 focus:ring-red-500 focus:border-red-500 bg-red-50'
+                            : 'border-gray-300 focus:ring-purple-500 focus:border-purple-500'
+                        }`}
                       />
-                      <p className="text-xs text-gray-500 mt-1">Verified using ZK proof commitment</p>
+                      <p className="text-xs text-gray-500 mt-1">
+                        {detectedProofType === 'citizenship' 
+                          ? 'Enter the exact name as it appears on the Aadhar document'
+                          : 'Verified using ZK proof commitment (optional for age proofs)'
+                        }
+                      </p>
                     </div>
 
                     {/* Citizenship/Country Input */}
                     <div>
                       <label className="block text-sm font-medium text-gray-700 mb-1">
                         Expected Citizenship/Country
+                        {detectedProofType === 'citizenship' && (
+                          <span className="ml-2 text-red-600 font-bold">* Required</span>
+                        )}
                       </label>
                       <input
                         type="text"
                         value={expectedCitizenship}
                         onChange={(e) => setExpectedCitizenship(e.target.value)}
                         placeholder="e.g., India"
-                        className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-purple-500"
+                        className={`w-full px-3 py-2 border rounded-lg focus:ring-2 ${
+                          detectedProofType === 'citizenship' && !expectedCitizenship.trim()
+                            ? 'border-red-400 focus:ring-red-500 focus:border-red-500 bg-red-50'
+                            : 'border-gray-300 focus:ring-purple-500 focus:border-purple-500'
+                        }`}
                       />
-                      <p className="text-xs text-gray-500 mt-1">Verified using ZK proof commitment</p>
+                      <p className="text-xs text-gray-500 mt-1">
+                        {detectedProofType === 'citizenship'
+                          ? 'Enter the expected citizenship/country (case-insensitive)'
+                          : 'Verified using ZK proof commitment (optional for age proofs)'
+                        }
+                      </p>
                     </div>
 
                     <div className="flex items-start gap-2 p-3 bg-indigo-50 border border-indigo-200 rounded-lg">
@@ -590,19 +744,25 @@ export function ProofScannerCard({ onVerificationComplete }: ProofScannerCardPro
               {/* Info */}
               <div className="mb-6 p-4 bg-blue-50 rounded-lg border border-blue-200">
                 <p className="text-sm text-blue-800">
-                  <strong>ℹ️ How to verify:</strong>
+                  <strong>ℹ️ How verification works:</strong>
                 </p>
                 <ul className="text-sm text-blue-700 mt-2 space-y-1 list-disc list-inside">
                   <li>Upload the JSON proof file downloaded from MinaID</li>
                   <li>Or paste the proof data in the text area</li>
-                  <li><strong>Optional:</strong> Expand &quot;Verify Specific Credentials&quot; to check name/citizenship</li>
-                  <li>Click &quot;Verify Proof&quot; to check authenticity</li>
+                  <li><strong>For Age Proofs (18+/21+):</strong> No additional inputs required - the proof type indicates the age requirement</li>
+                  <li><strong>For Citizenship Proofs:</strong> Name and Citizenship fields are <strong>REQUIRED</strong></li>
+                  <li>Click &quot;Verify Proof&quot; to perform <strong>on-chain verification</strong></li>
                 </ul>
                 <div className="mt-3 pt-3 border-t border-blue-200">
                   <p className="text-xs text-blue-700">
-                    <strong>⚠️ Important:</strong> If you enter expected credentials (name/citizenship), 
-                    the verification will <strong>FAIL</strong> unless they exactly match the proof. 
-                    Leave them empty to skip credential verification.
+                    <strong>🔗 On-Chain Verification:</strong> Your proof is verified using the Mina blockchain smart contract. 
+                    This ensures cryptographic proof validity is checked in a trustless, decentralized manner.
+                  </p>
+                </div>
+                <div className="mt-2 pt-2 border-t border-blue-200">
+                  <p className="text-xs text-blue-600">
+                    <strong>📝 Note:</strong> Proofs are generated <strong>off-chain</strong> (in the browser) 
+                    to protect user privacy. Verification happens <strong>on-chain</strong> to ensure trust.
                   </p>
                 </div>
               </div>

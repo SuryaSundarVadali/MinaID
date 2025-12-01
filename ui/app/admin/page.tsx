@@ -12,7 +12,7 @@ export default function AdminPage() {
   const [cleared, setCleared] = useState(false);
 
   const handleClearAllData = () => {
-    if (confirm('⚠️ This will delete ALL data including wallets, passkeys, and proofs. Continue?')) {
+    if (confirm('⚠️ This will delete ALL data including:\n- Wallet connections\n- Passkeys & encrypted keys\n- Aadhar data & proofs\n- Merkle tree state\n- Session data\n- Transaction records\n\nContinue?')) {
       clearAllData();
       setDataSummary(getDataSummary());
       setCleared(true);
@@ -62,10 +62,12 @@ export default function AdminPage() {
             <p>This will remove all localStorage data including:</p>
             <ul style={{ textAlign: 'left', marginLeft: '1.5rem' }}>
               <li>Wallet connections</li>
-              <li>Passkeys</li>
+              <li>Passkeys & encrypted private keys</li>
               <li>Aadhar data</li>
               <li>Generated proofs</li>
               <li>Session data</li>
+              <li><strong>Merkle tree state</strong></li>
+              <li>Transaction records</li>
             </ul>
             <button 
               onClick={handleClearAllData}

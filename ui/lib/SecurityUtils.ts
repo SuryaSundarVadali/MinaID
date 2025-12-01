@@ -6,10 +6,14 @@
 
 /**
  * Safe base64 decode without using atob (browser-compatible)
+ * Supports both standard Base64 and Base64URL
  * @param base64 Base64 encoded string
  * @returns Uint8Array of decoded bytes
  */
 export function base64ToBytes(base64: string): Uint8Array {
+  // Normalize Base64URL to Base64
+  base64 = base64.replace(/-/g, '+').replace(/_/g, '/');
+  
   const base64abc = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
   const l = base64.length;
   const placeHolders = base64[l - 2] === '=' ? 2 : base64[l - 1] === '=' ? 1 : 0;
