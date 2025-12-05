@@ -115,20 +115,8 @@ export default function DIDProofGenerator({ proofType = 'citizenship' }: DIDProo
     setWalletType(type);
   }, [session]);
 
-  // Check if user already has a DID proof
-  useEffect(() => {
-    if (session?.did) {
-      const proofs = ProofStorage.getProofsByDID(session.did);
-      const hasVerifiedProof = proofs.some((p: any) => 
-        p.status === 'verified' && (p.type === 'kyc' || p.type === 'composite' || p.type === 'age')
-      );
-      
-      if (hasVerifiedProof) {
-        // User already has verified proof, redirect to dashboard
-        router.push('/dashboard');
-      }
-    }
-  }, [session, router]);
+  // Note: We no longer auto-redirect users who have verified proofs
+  // Users may want to generate additional proofs of different types
 
   const handleGenerateProof = async () => {
     if (!userIdentifier) {
@@ -144,23 +132,47 @@ export default function DIDProofGenerator({ proofType = 'citizenship' }: DIDProo
     // Also check localStorage for backup passkeyId
     let passkeyId = session?.passkeyId;
     
-    if (!passkeyId) {
-      // Try to get from wallet connection data
-      const walletData = localStorage.getItem('minaid_wallet_connected');
-      if (walletData) {
-        try {
-          const parsed = JSON.parse(walletData);
+    // Check wallet connection data for passkeyId and wallet type
+    const walletData = localStorage.getItem('minaid_wallet_connected');
+    let isSimpleSignup = false;
+    let isAuroWallet = false;
+    
+    if (walletData) {
+      try {
+        const parsed = JSON.parse(walletData);
+        if (!passkeyId && parsed.passkeyId) {
           passkeyId = parsed.passkeyId;
-        } catch (e) {
-          console.error('[DIDProofGenerator] Failed to parse wallet data:', e);
         }
+        isSimpleSignup = parsed.simpleSignup === true;
+        isAuroWallet = parsed.walletType === 'auro';
+      } catch (e) {
+        console.error('[DIDProofGenerator] Failed to parse wallet data:', e);
       }
     }
     
-    if (!session?.did || !passkeyId) {
-      console.error('[DIDProofGenerator] Incomplete session:', { 
+    // User can generate proofs if:
+    // 1. They have a passkeyId (from session or localStorage), OR
+    // 2. They are an Auro wallet user (can use deterministic key), OR  
+    // 3. They are a simpleSignup user (new wallet-only user)
+    const canGenerateProof = !!passkeyId || isAuroWallet || isSimpleSignup;
+    
+    if (!session?.did && !userIdentifier) {
+      console.error('[DIDProofGenerator] No user identifier available');
+      setState(prev => ({ 
+        ...prev, 
+        step: 'error',
+        error: 'Please connect your wallet first.' 
+      }));
+      return;
+    }
+    
+    if (!canGenerateProof) {
+      console.error('[DIDProofGenerator] Cannot generate proof - no valid authentication method:', { 
         hasDid: !!session?.did, 
         hasPasskeyId: !!passkeyId,
+        isSimpleSignup,
+        isAuroWallet,
+        canGenerateProof,
         session 
       });
       
@@ -172,11 +184,17 @@ export default function DIDProofGenerator({ proofType = 'citizenship' }: DIDProo
       return;
     }
 
+    // Determine the effective DID to use (session.did or userIdentifier for Auro wallet)
+    const effectiveDid = session?.did || userIdentifier;
+    
     console.log('[DIDProofGenerator] Starting proof generation with session:', {
-      did: session.did,
+      did: effectiveDid,
       passkeyId: passkeyId,
       walletType,
-      userIdentifier
+      userIdentifier,
+      isSimpleSignup,
+      isAuroWallet,
+      canGenerateProof
     });
 
     setState(prev => ({ 
@@ -194,23 +212,23 @@ export default function DIDProofGenerator({ proofType = 'citizenship' }: DIDProo
         statusMessage: 'Authenticating...'
       }));
       
-      console.log('[DIDProofGenerator] Loading private key for:', walletType, session.did);
+      console.log('[DIDProofGenerator] Loading private key for:', walletType, effectiveDid);
       
       let privateKey: PrivateKey;
       
-      // Check if user is using Auro wallet with simple signup (no stored private key)
-      const walletData = localStorage.getItem('minaid_wallet_connected');
-      const isSimpleSignup = walletData && JSON.parse(walletData).simpleSignup === true;
-      
-      if (isSimpleSignup || walletType === 'auro') {
+      if (isSimpleSignup || isAuroWallet) {
         // For Auro wallet users without stored keys, generate a deterministic key from wallet address
         // This ensures consistent key generation for the same wallet address
         console.log('[DIDProofGenerator] Using Auro wallet mode - generating deterministic key from address');
         
         try {
           // First try to load stored key (if they did full signup)
-          const privateKeyString = await loadPrivateKey(walletType, passkeyId, session.did);
-          privateKey = PrivateKey.fromBase58(privateKeyString);
+          if (passkeyId && effectiveDid) {
+            const privateKeyString = await loadPrivateKey(walletType, passkeyId, effectiveDid);
+            privateKey = PrivateKey.fromBase58(privateKeyString);
+          } else {
+            throw new Error('No passkey available, using deterministic key');
+          }
         } catch (keyError: any) {
           // No stored key - generate deterministic key for proof generation
           // Note: This is for development/testing. In production, you'd want proper key management.
@@ -239,7 +257,10 @@ export default function DIDProofGenerator({ proofType = 'citizenship' }: DIDProo
       } else {
         // Standard flow - load from secure storage
         try {
-          const privateKeyString = await loadPrivateKey(walletType, passkeyId, session.did);
+          if (!passkeyId || !effectiveDid) {
+            throw new Error('Missing passkey or DID for standard flow');
+          }
+          const privateKeyString = await loadPrivateKey(walletType, passkeyId, effectiveDid);
           privateKey = PrivateKey.fromBase58(privateKeyString);
         } catch (keyError: any) {
           console.error('[DIDProofGenerator] Failed to load private key:', keyError);

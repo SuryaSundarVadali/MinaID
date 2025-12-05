@@ -36,8 +36,36 @@ export function VerifierDashboard() {
   const { session, logout } = useWallet();
   const [activeTab, setActiveTab] = useState<'request' | 'scan' | 'history'>('request');
   const [refreshTrigger, setRefreshTrigger] = useState(0);
+  const [isReady, setIsReady] = useState(false);
+  const [userIdentifier, setUserIdentifier] = useState<string | null>(null);
+
+  // Check for authentication via session or localStorage
+  React.useEffect(() => {
+    let identifier = session?.did || null;
+    
+    // Also check localStorage for wallet connection
+    if (!identifier) {
+      const walletData = localStorage.getItem('minaid_wallet_connected');
+      if (walletData) {
+        try {
+          const parsed = JSON.parse(walletData);
+          identifier = parsed.did || parsed.address;
+        } catch (e) {
+          console.error('[VerifierDashboard] Failed to parse wallet data:', e);
+        }
+      }
+    }
+    
+    setUserIdentifier(identifier);
+    setIsReady(true);
+  }, [session]);
 
   const handleLogout = () => {
+    // Clear passkey verification on logout
+    localStorage.removeItem('minaid_passkey_last_verified');
+    localStorage.removeItem('minaid_passkey_verified_did');
+    sessionStorage.removeItem('minaid_passkey_verified');
+    
     logout();
     router.push('/');
   };
@@ -47,7 +75,8 @@ export function VerifierDashboard() {
     setRefreshTrigger(prev => prev + 1);
   };
 
-  if (!session) {
+  // Show loading while checking auth
+  if (!isReady) {
     return (
       <div className="min-h-screen flex items-center justify-center">
         <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-indigo-600"></div>

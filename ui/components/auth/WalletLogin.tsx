@@ -80,8 +80,17 @@ export function WalletLogin() {
         // User has existing account - proceed to passkey auth in Login component
         router.push('/login');
       } else {
-        // New user - create basic session and go to dashboard
+        // New user - store wallet connection data and go to dashboard
         // User will complete profile setup (Aadhar, passkey, DID) from dashboard
+        const walletConnectionData = {
+          walletType: 'auro',
+          address: walletInfo.address,
+          publicKey: walletInfo.publicKey,
+          timestamp: Date.now(),
+          simpleSignup: true, // Flag for new users without full passkey setup
+        };
+        localStorage.setItem('minaid_wallet_connected', JSON.stringify(walletConnectionData));
+        console.log('[WalletLogin] Stored wallet connection data for new user:', walletConnectionData);
         router.push('/dashboard');
       }
 
@@ -122,7 +131,16 @@ export function WalletLogin() {
       if (hasKey) {
         router.push('/login');
       } else {
-        // New user - go to dashboard to complete profile setup
+        // New user - store wallet connection data and go to dashboard
+        const walletConnectionData = {
+          walletType: 'metamask',
+          address: walletInfo.address,
+          publicKey: walletInfo.publicKey,
+          timestamp: Date.now(),
+          simpleSignup: true, // Flag for new users without full passkey setup
+        };
+        localStorage.setItem('minaid_wallet_connected', JSON.stringify(walletConnectionData));
+        console.log('[WalletLogin] Stored wallet connection data for new user:', walletConnectionData);
         router.push('/dashboard');
       }
 

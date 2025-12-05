@@ -97,6 +97,23 @@ export async function registerDIDOnChain(
   try {
     console.log('[BlockchainHelpers] Registering DID on blockchain:', did);
     
+    // Check if DID is already registered locally (to avoid re-registration attempts)
+    const existingTxHash = localStorage.getItem(`minaid_did_tx_${did}`);
+    if (existingTxHash) {
+      console.log('[BlockchainHelpers] DID already registered locally, skipping:', existingTxHash);
+      return existingTxHash;
+    }
+    
+    // Also check if this public key has been registered before
+    const registeredKeys = localStorage.getItem('minaid_registered_keys');
+    if (registeredKeys) {
+      const keys = JSON.parse(registeredKeys);
+      if (keys.includes(publicKeyBase58)) {
+        console.log('[BlockchainHelpers] Public key already registered, skipping');
+        return 'already-registered';
+      }
+    }
+    
     // Parse keys
     const publicKey = PublicKey.fromBase58(publicKeyBase58);
     const privateKey = privateKeyBase58 ? PrivateKey.fromBase58(privateKeyBase58) : null;
@@ -130,14 +147,40 @@ export async function registerDIDOnChain(
       merkleMap.set(mapKey, documentHash);
       saveMerkleMapState(mapKey, documentHash);
       
+      // Track this public key as registered
+      const existingKeys = localStorage.getItem('minaid_registered_keys');
+      const keys = existingKeys ? JSON.parse(existingKeys) : [];
+      keys.push(publicKeyBase58);
+      localStorage.setItem('minaid_registered_keys', JSON.stringify(keys));
+      
       console.log('[BlockchainHelpers] ✅ DID registered successfully:', result.hash);
       console.log('[BlockchainHelpers] Explorer:', getExplorerUrl(result.hash, NETWORK_CONFIG.networkId));
       return result.hash;
     } else {
+      // Check if error is "already registered" - this is not a failure
+      if (result.error?.includes('already registered') || result.error?.includes('Merkle witness')) {
+        console.log('[BlockchainHelpers] DID appears to be already registered on-chain');
+        // Mark as registered to prevent future attempts
+        const existingKeys = localStorage.getItem('minaid_registered_keys');
+        const keys = existingKeys ? JSON.parse(existingKeys) : [];
+        keys.push(publicKeyBase58);
+        localStorage.setItem('minaid_registered_keys', JSON.stringify(keys));
+        return 'already-registered';
+      }
       console.warn('[BlockchainHelpers] DID registration failed:', result.error);
       return null;
     }
   } catch (error: any) {
+    // Handle "already registered" errors gracefully
+    if (error.message?.includes('already registered') || error.message?.includes('Merkle witness')) {
+      console.log('[BlockchainHelpers] DID appears to be already registered (caught error)');
+      // Mark as registered
+      const existingKeys = localStorage.getItem('minaid_registered_keys');
+      const keys = existingKeys ? JSON.parse(existingKeys) : [];
+      keys.push(publicKeyBase58);
+      localStorage.setItem('minaid_registered_keys', JSON.stringify(keys));
+      return 'already-registered';
+    }
     console.error('[BlockchainHelpers] Error registering DID:', error.message);
     return null;
   }

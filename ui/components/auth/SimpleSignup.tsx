@@ -179,11 +179,15 @@ export function SimpleSignup() {
 
       // Register DID on blockchain (async, don't block UI)
       registerDIDOnChain(state.did, publicKey.toBase58(), privateKey?.toBase58())
-        .then((txHash: string | null) => {
-          if (txHash) {
-            console.log('[SimpleSignup] DID registered on blockchain:', txHash);
+        .then((result: string | null) => {
+          if (result === 'already-registered') {
+            console.log('[SimpleSignup] DID already registered on blockchain (this is OK)');
+          } else if (result) {
+            console.log('[SimpleSignup] DID registered on blockchain:', result);
             // Store transaction hash
-            localStorage.setItem(`minaid_did_tx_${state.did}`, txHash);
+            localStorage.setItem(`minaid_did_tx_${state.did}`, result);
+          } else {
+            console.log('[SimpleSignup] DID registration skipped or failed (non-critical)');
           }
         })
         .catch((err: Error) => {

@@ -20,7 +20,7 @@ import { usePasskey } from '../hooks/usePasskey';
 
 export function EnhancedDashboard() {
   const router = useRouter();
-  const { session, logout, isConnected } = useWallet();
+  const { session, logout, isConnected, isSessionLoading } = useWallet();
   const { authenticateWithPasskey, isSupported } = usePasskey();
   const [isLoading, setIsLoading] = useState(false);
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -37,29 +37,59 @@ export function EnhancedDashboard() {
 
   // Check if passkey verification is needed
   useEffect(() => {
+    // Wait for session loading to complete before checking authentication
+    if (isSessionLoading) {
+      return;
+    }
+    
     const walletData = localStorage.getItem('minaid_wallet_connected');
     if (walletData) {
       const data = JSON.parse(walletData);
       const userDid = data.did || data.address;
+      const isSimpleSignup = data.simpleSignup === true;
+      const hasStoredPasskeyId = !!data.passkeyId;
+      
+      // For simpleSignup users (quick wallet connect), skip passkey verification
+      // They don't have passkeys yet
+      if (isSimpleSignup && !hasStoredPasskeyId) {
+        setPasskeyVerified(true);
+        return;
+      }
       
       // Check if user has a passkey registered
       if (userDid && hasPasskey(userDid)) {
-        // Check if already verified in this session
-        const sessionVerified = sessionStorage.getItem('minaid_passkey_verified');
-        if (sessionVerified === 'true') {
+        // Check if already verified in this browser session (localStorage persists)
+        const lastVerified = localStorage.getItem('minaid_passkey_last_verified');
+        const verifiedDid = localStorage.getItem('minaid_passkey_verified_did');
+        
+        // Passkey is valid for 24 hours or until logout
+        const verificationValid = lastVerified && 
+          verifiedDid === userDid &&
+          (Date.now() - parseInt(lastVerified)) < 24 * 60 * 60 * 1000;
+        
+        if (verificationValid) {
           setPasskeyVerified(true);
         } else {
-          setPasskeyRequired(true);
+          // Also check sessionStorage for same-tab verification
+          const sessionVerified = sessionStorage.getItem('minaid_passkey_verified');
+          if (sessionVerified === 'true') {
+            setPasskeyVerified(true);
+            // Persist to localStorage
+            localStorage.setItem('minaid_passkey_last_verified', Date.now().toString());
+            localStorage.setItem('minaid_passkey_verified_did', userDid);
+          } else {
+            setPasskeyRequired(true);
+          }
         }
       } else {
         // No passkey registered, allow access
         setPasskeyVerified(true);
       }
-    } else {
-      // No wallet connected, redirect to login
+    } else if (!isConnected) {
+      // No wallet connected and no localStorage data, redirect to login
       router.push('/login');
     }
-  }, [router]);
+  }, [router, isSessionLoading, isConnected]);
 
   // Check if user needs to complete profile setup
   useEffect(() => {
@@ -115,6 +145,15 @@ export function EnhancedDashboard() {
         setPasskeyRequired(false);
         // Store in session storage so user doesn't need to re-verify on refresh
         sessionStorage.setItem('minaid_passkey_verified', 'true');
+        
+        // Also persist to localStorage for longer-term verification (24 hours)
+        const walletData = localStorage.getItem('minaid_wallet_connected');
+        if (walletData) {
+          const data = JSON.parse(walletData);
+          const userDid = data.did || data.address;
+          localStorage.setItem('minaid_passkey_last_verified', Date.now().toString());
+          localStorage.setItem('minaid_passkey_verified_did', userDid);
+        }
       } else {
         throw new Error('Passkey verification failed');
       }
@@ -127,6 +166,11 @@ export function EnhancedDashboard() {
   };
 
   const handleLogout = () => {
+    // Clear passkey verification on logout
+    localStorage.removeItem('minaid_passkey_last_verified');
+    localStorage.removeItem('minaid_passkey_verified_did');
+    sessionStorage.removeItem('minaid_passkey_verified');
+    
     logout();
     router.push('/');
   };
@@ -145,8 +189,8 @@ export function EnhancedDashboard() {
     router.push('/upload-aadhar');
   };
 
-  // Show loading while checking wallet connection
-  if (!isConnected && !session && !walletConnected) {
+  // Show loading while checking wallet connection or restoring session
+  if (isSessionLoading || (!isConnected && !session && !walletConnected)) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-gray-50 to-gray-100">
         <div className="text-center">

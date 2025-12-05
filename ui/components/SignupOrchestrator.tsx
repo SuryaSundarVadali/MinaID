@@ -302,9 +302,6 @@ export function SignupOrchestrator({ onSuccess }: SignupOrchestratorProps = {}) 
       );
       const contractInterface = new ContractInterface(networkConfig);
       await contractInterface.initialize();
-
-      // Import the global Merkle map handler to maintain consistent state
-      const { default: BlockchainHelpers } = await import('../lib/BlockchainHelpers');
       
       // Create Merkle witness for DID using persistent state
       // Note: For initial implementation, we need to sync with on-chain state

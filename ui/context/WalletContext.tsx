@@ -56,6 +56,7 @@ export interface WalletContextValue {
   session: WalletSession | null;
   isConnected: boolean;
   isLoading: boolean;
+  isSessionLoading: boolean; // True while restoring session from localStorage
   error: string | null;
 
   // Wallet connection
@@ -88,6 +89,7 @@ interface WalletProviderProps {
 export function WalletProvider({ children }: WalletProviderProps) {
   const [session, setSession] = useState<WalletSession | null>(null);
   const [isLoading, setIsLoading] = useState(false);
+  const [isSessionLoading, setIsSessionLoading] = useState(true); // True until session restoration completes
   const [error, setError] = useState<string | null>(null);
   const { authenticateWithPasskey } = usePasskey();
 
@@ -119,6 +121,9 @@ export function WalletProvider({ children }: WalletProviderProps) {
         console.error('Failed to restore session:', err);
       }
     }
+    
+    // Mark session restoration as complete
+    setIsSessionLoading(false);
   }, []);
 
   /**
@@ -462,9 +467,18 @@ export function WalletProvider({ children }: WalletProviderProps) {
 
     // Clear session marker
     localStorage.removeItem('minaid_session');
+    
+    // Clear passkey verification
+    localStorage.removeItem('minaid_passkey_last_verified');
+    localStorage.removeItem('minaid_passkey_verified_did');
+    
+    // Clear wallet connection data
+    localStorage.removeItem('minaid_wallet_connected');
 
     setSession(null);
     setError(null);
+    
+    console.log('[WalletContext] Logged out and cleared session data');
   }, [session]);
 
   /**
@@ -502,6 +516,7 @@ export function WalletProvider({ children }: WalletProviderProps) {
     session,
     isConnected,
     isLoading,
+    isSessionLoading,
     error,
     connectAuroWallet,
     connectMetamask,

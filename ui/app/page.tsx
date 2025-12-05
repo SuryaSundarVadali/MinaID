@@ -9,14 +9,33 @@ import styles from '../styles/Home.module.css';
 
 export default function Home() {
   const router = useRouter();
-  const { session, isConnected } = useWallet();
+  const { session, isConnected, isSessionLoading } = useWallet();
 
   // Redirect to dashboard if already logged in with valid session
   useEffect(() => {
+    // Wait for session restoration before checking
+    if (isSessionLoading) {
+      return;
+    }
+    
     if (isConnected && session) {
       router.push('/dashboard');
     }
-  }, [isConnected, session, router]);
+  }, [isConnected, session, isSessionLoading, router]);
+
+  // Show loading while checking session
+  if (isSessionLoading) {
+    return (
+      <GradientBG>
+        <div className={styles.main} style={{ display: 'flex', justifyContent: 'center', alignItems: 'center' }}>
+          <div style={{ textAlign: 'center' }}>
+            <div className="animate-spin rounded-full h-16 w-16 border-b-4 border-indigo-600 mx-auto mb-4"></div>
+            <p style={{ color: 'white', marginTop: '1rem' }}>Loading...</p>
+          </div>
+        </div>
+      </GradientBG>
+    );
+  }
 
   return (
     <GradientBG>

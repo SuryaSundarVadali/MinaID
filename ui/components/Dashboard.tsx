@@ -28,7 +28,7 @@ interface DashboardProps {
 
 export function Dashboard({ onLogout }: DashboardProps = {}) {
   const router = useRouter();
-  const { session, logout, loadPrivateKey, isConnected } = useWallet();
+  const { session, logout, loadPrivateKey, isConnected, isSessionLoading } = useWallet();
   const { listPasskeys, deletePasskey } = usePasskey();
 
   const [proofs, setProofs] = useState<{
@@ -41,10 +41,17 @@ export function Dashboard({ onLogout }: DashboardProps = {}) {
 
   // Redirect to login if not authenticated
   useEffect(() => {
-    if (!isConnected) {
+    // Wait for session loading before checking authentication
+    if (isSessionLoading) {
+      return;
+    }
+    
+    // Also check localStorage for wallet connection
+    const walletData = localStorage.getItem('minaid_wallet_connected');
+    if (!isConnected && !walletData) {
       router.push('/login');
     }
-  }, [isConnected, router]);
+  }, [isConnected, isSessionLoading, router]);
 
   /**
    * Generate age proof

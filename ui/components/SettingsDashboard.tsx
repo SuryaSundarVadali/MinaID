@@ -6,7 +6,7 @@
 
 'use client';
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { useWallet } from '../context/WalletContext';
 import { AccountSecurityCard } from './settings/AccountSecurityCard';
@@ -17,16 +17,64 @@ export function SettingsDashboard() {
   const router = useRouter();
   const { session, logout } = useWallet();
   const [activeSection, setActiveSection] = useState<'security' | 'data' | 'danger'>('security');
+  const [isReady, setIsReady] = useState(false);
+  const [userIdentifier, setUserIdentifier] = useState<string | null>(null);
+
+  // Check for authentication via session or localStorage
+  useEffect(() => {
+    let identifier = session?.did || null;
+    
+    // Also check localStorage for wallet connection
+    if (!identifier) {
+      const walletData = localStorage.getItem('minaid_wallet_connected');
+      if (walletData) {
+        try {
+          const parsed = JSON.parse(walletData);
+          identifier = parsed.did || parsed.address;
+        } catch (e) {
+          console.error('[SettingsDashboard] Failed to parse wallet data:', e);
+        }
+      }
+    }
+    
+    setUserIdentifier(identifier);
+    setIsReady(true);
+  }, [session]);
 
   const handleLogout = () => {
+    // Clear passkey verification on logout
+    localStorage.removeItem('minaid_passkey_last_verified');
+    localStorage.removeItem('minaid_passkey_verified_did');
+    sessionStorage.removeItem('minaid_passkey_verified');
+    
     logout();
     router.push('/');
   };
 
-  if (!session) {
+  // Show loading while checking auth
+  if (!isReady) {
     return (
       <div className="min-h-screen flex items-center justify-center">
         <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-indigo-600"></div>
+      </div>
+    );
+  }
+
+  // Create effective session for components (use actual session or construct from localStorage)
+  const effectiveSession = session || (userIdentifier ? {
+    did: userIdentifier,
+    passkeyId: '',
+    wallets: [],
+    primaryWallet: 'auro' as const,
+    expiresAt: Date.now() + 3600000,
+  } : null);
+
+  if (!effectiveSession) {
+    return (
+      <div className="min-h-screen flex items-center justify-center">
+        <div className="text-center">
+          <p className="text-gray-600">Please log in to access settings.</p>
+        </div>
       </div>
     );
   }
@@ -135,15 +183,15 @@ export function SettingsDashboard() {
         {/* Content Sections */}
         <div className="space-y-6">
           {activeSection === 'security' && (
-            <AccountSecurityCard session={session} />
+            <AccountSecurityCard session={effectiveSession} />
           )}
 
           {activeSection === 'data' && (
-            <DataManagementCard session={session} />
+            <DataManagementCard session={effectiveSession} />
           )}
 
           {activeSection === 'danger' && (
-            <AccountDeletionCard session={session} />
+            <AccountDeletionCard session={effectiveSession} />
           )}
         </div>
 
