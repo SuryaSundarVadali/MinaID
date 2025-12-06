@@ -256,16 +256,37 @@ export class ContractInterface {
             }
           );
 
-          console.log('Proving transaction...');
+          console.log('Proving transaction (this may take 2-3 minutes)...');
+          const startProve = Date.now();
           await tx.prove();
+          const proveTime = ((Date.now() - startProve) / 1000).toFixed(1);
+          console.log(`Transaction proved successfully in ${proveTime}s`);
+
+          // Get the transaction JSON AFTER proving - this includes the proof
+          const transactionJSON = tx.toJSON();
+          
+          // Verify the proof is included in the transaction
+          const txData = JSON.parse(transactionJSON);
+          if (!txData || !txData.zkappCommand) {
+            throw new Error('Transaction JSON is invalid - missing zkappCommand');
+          }
+          
+          // Check if account updates have proofs
+          const accountUpdates = txData.zkappCommand.accountUpdates || [];
+          const hasProof = accountUpdates.some((update: any) => 
+            update.authorization && update.authorization.proof
+          );
+          
+          if (!hasProof) {
+            console.warn('Warning: No proof found in transaction - this may fail');
+          } else {
+            console.log('Transaction proof verified present');
+          }
 
           console.log('Sending transaction via wallet...');
+          // Only pass the transaction - fee is already embedded from Mina.transaction()
           const { hash } = await (window as any).mina.sendTransaction({
-            transaction: tx.toJSON(),
-            feePayer: {
-              fee: 0.1,
-              memo: ''
-            }
+            transaction: transactionJSON
           });
 
           return {
