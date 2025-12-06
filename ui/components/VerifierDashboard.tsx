@@ -1,25 +1,23 @@
 /**
  * VerifierDashboard.tsx
  * 
- * Dashboard for verifiers to request and verify zero-knowledge proofs
+ * Simplified verifier dashboard with homepage-style UI
+ * Allows uploading proof JSON files for verification
  */
 
 'use client';
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
+import Image from 'next/image';
 import { useWallet } from '../context/WalletContext';
-import { ProofRequestCard } from './verifier/ProofRequestCard';
-import { ProofScannerCard } from './verifier/ProofScannerCard';
-import { VerificationHistoryCard } from './verifier/VerificationHistoryCard';
-
-export type ProofRequest = {
-  id: string;
-  type: 'age' | 'kyc' | 'composite';
-  parameters: any;
-  createdAt: number;
-  status: 'pending' | 'fulfilled' | 'expired';
-};
+import GradientBG from './GradientBG';
+import heroMinaLogo from '../public/assets/hero-mina-logo.svg';
+import styles from '../styles/Home.module.css';
+import { rateLimiter, RateLimitConfigs, formatTimeRemaining } from '../lib/RateLimiter';
+import { validateProofData, containsSuspiciousPatterns } from '../lib/InputValidator';
+import { logSecurityEvent } from '../lib/SecurityUtils';
+import { getContractInterface } from '../lib/ContractInterface';
 
 export type VerificationResult = {
   id: string;
@@ -33,219 +31,298 @@ export type VerificationResult = {
 
 export function VerifierDashboard() {
   const router = useRouter();
-  const { session, logout } = useWallet();
-  const [activeTab, setActiveTab] = useState<'request' | 'scan' | 'history'>('request');
-  const [refreshTrigger, setRefreshTrigger] = useState(0);
-  const [isReady, setIsReady] = useState(false);
-  const [userIdentifier, setUserIdentifier] = useState<string | null>(null);
+  const { logout } = useWallet();
+  
+  const [proofFile, setProofFile] = useState<File | null>(null);
+  const [proofData, setProofData] = useState<any>(null);
+  const [isVerifying, setIsVerifying] = useState(false);
+  const [verificationResult, setVerificationResult] = useState<any>(null);
+  const [error, setError] = useState<string>('');
+  const [expectedName, setExpectedName] = useState('');
+  const [expectedCitizenship, setExpectedCitizenship] = useState('');
+  const [history, setHistory] = useState<any[]>([]);
 
-  // Check for authentication via session or localStorage
-  React.useEffect(() => {
-    let identifier = session?.did || null;
-    
-    // Also check localStorage for wallet connection
-    if (!identifier) {
-      const walletData = localStorage.getItem('minaid_wallet_connected');
-      if (walletData) {
-        try {
-          const parsed = JSON.parse(walletData);
-          identifier = parsed.did || parsed.address;
-        } catch (e) {
-          console.error('[VerifierDashboard] Failed to parse wallet data:', e);
-        }
-      }
+  useEffect(() => {
+    const stored = localStorage.getItem('minaid_verification_history');
+    if (stored) {
+      setHistory(JSON.parse(stored).slice(0, 10));
     }
-    
-    setUserIdentifier(identifier);
-    setIsReady(true);
-  }, [session]);
+  }, []);
 
   const handleLogout = () => {
-    // Clear passkey verification on logout
     localStorage.removeItem('minaid_passkey_last_verified');
     localStorage.removeItem('minaid_passkey_verified_did');
     sessionStorage.removeItem('minaid_passkey_verified');
-    
     logout();
     router.push('/');
   };
 
-  const handleVerificationComplete = (result: VerificationResult) => {
-    console.log('[VerifierDashboard] Verification complete:', result);
-    setRefreshTrigger(prev => prev + 1);
+  const handleFileUpload = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+    setError('');
+    setVerificationResult(null);
+
+    if (!file.name.endsWith('.json')) {
+      setError('Please upload a JSON file');
+      return;
+    }
+    if (file.size > 1024 * 1024) {
+      setError('File too large. Maximum size is 1MB');
+      return;
+    }
+
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      try {
+        const content = e.target?.result as string;
+        const parsed = JSON.parse(content);
+        if (containsSuspiciousPatterns(content)) {
+          setError('Invalid proof: suspicious content detected');
+          return;
+        }
+        setProofFile(file);
+        setProofData(parsed);
+      } catch {
+        setError('Invalid JSON file');
+      }
+    };
+    reader.readAsText(file);
   };
 
-  // Show loading while checking auth
-  if (!isReady) {
-    return (
-      <div className="min-h-screen flex items-center justify-center">
-        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-indigo-600"></div>
-      </div>
-    );
-  }
+  const handleVerify = async () => {
+    if (!proofData) {
+      setError('Please upload a proof file first');
+      return;
+    }
+
+    const rateLimitKey = 'proof_verification:verifier';
+    if (!rateLimiter.isAllowed(rateLimitKey, RateLimitConfigs.PROOF_VERIFICATION)) {
+      const timeRemaining = rateLimiter.getTimeUntilUnblocked(rateLimitKey);
+      setError(`Rate limit exceeded. Try again in ${formatTimeRemaining(timeRemaining)}.`);
+      return;
+    }
+
+    setIsVerifying(true);
+    setError('');
+
+    try {
+      const validation = validateProofData(proofData);
+      if (!validation.valid) {
+        throw new Error(`Invalid proof: ${validation.error}`);
+      }
+
+      const proofId = proofData.metadata?.proofId || proofData.id || 'unknown';
+      const proofType = proofData.proofType || proofData.type || 'unknown';
+      const subjectDID = proofData.did || proofData.subjectDID || 'unknown';
+      
+      if (proofType === 'citizenship' && (!expectedName.trim() || !expectedCitizenship.trim())) {
+        throw new Error('Citizenship verification requires Name and Citizenship fields');
+      }
+
+      let credentialChecks: any = {};
+      const selectiveDisclosure = proofData.selectiveDisclosure;
+      
+      if (selectiveDisclosure?.salt) {
+        const { verifySelectiveDisclosureProof, verifyCitizenshipZKProof } = await import('../lib/ProofGenerator');
+        const { PublicKey } = await import('o1js');
+        
+        let userPublicKey: any = null;
+        try {
+          const parsedProof = typeof proofData.proof === 'string' ? JSON.parse(proofData.proof) : proofData.proof;
+          if (parsedProof?.publicKey) {
+            userPublicKey = PublicKey.fromBase58(parsedProof.publicKey);
+          } else {
+            userPublicKey = PublicKey.fromBase58(subjectDID.replace('did:mina:', ''));
+          }
+        } catch {}
+
+        if (expectedName.trim() && selectiveDisclosure.name && userPublicKey) {
+          try {
+            const isValid = verifySelectiveDisclosureProof(
+              expectedName.trim(),
+              selectiveDisclosure.name.commitment,
+              selectiveDisclosure.salt,
+              selectiveDisclosure.name.signature,
+              'name',
+              userPublicKey
+            );
+            credentialChecks.name = { expected: expectedName.trim(), matches: isValid };
+          } catch {
+            credentialChecks.name = { expected: expectedName.trim(), matches: false };
+          }
+        }
+
+        if (expectedCitizenship.trim() && selectiveDisclosure.citizenship && userPublicKey) {
+          try {
+            const isValid = verifyCitizenshipZKProof(
+              expectedCitizenship.trim(),
+              selectiveDisclosure.citizenship.commitment,
+              selectiveDisclosure.salt,
+              selectiveDisclosure.citizenship.signature,
+              userPublicKey
+            );
+            credentialChecks.citizenship = { expected: expectedCitizenship.trim(), matches: isValid };
+          } catch {
+            credentialChecks.citizenship = { expected: expectedCitizenship.trim(), matches: false };
+          }
+        }
+      }
+
+      let txHash = '';
+      let status: 'verified' | 'failed' = 'verified';
+
+      try {
+        const contractInterface = await getContractInterface();
+        const txResult = await contractInterface.verifyProofOnChain(proofData, 'EKEpKAJmk5UqjTVbXgWHoyWWTAx7PWbuxnd8gLh4kkNX7ESTdWFY');
+        if (txResult.success) txHash = txResult.hash;
+        else status = 'failed';
+      } catch {
+        status = 'failed';
+      }
+
+      const credentialFailed = Object.values(credentialChecks).some((c: any) => !c.matches);
+      if (credentialFailed) status = 'failed';
+
+      const result = { id: `v_${Date.now()}`, proofId, proofType, subjectDID, status, timestamp: Date.now(), credentialChecks, txHash };
+      const newHistory = [result, ...history].slice(0, 20);
+      localStorage.setItem('minaid_verification_history', JSON.stringify(newHistory));
+      setHistory(newHistory);
+      setVerificationResult(result);
+      logSecurityEvent('proof_verified', { proofId, status }, 'info');
+    } catch (err: any) {
+      setError(err.message || 'Verification failed');
+    } finally {
+      setIsVerifying(false);
+    }
+  };
+
+  const handleReset = () => {
+    setProofFile(null);
+    setProofData(null);
+    setVerificationResult(null);
+    setError('');
+    setExpectedName('');
+    setExpectedCitizenship('');
+  };
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-gray-50 to-gray-100">
-      {/* Header */}
-      <header className="bg-white shadow-sm border-b border-gray-200">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-          <div className="flex justify-between items-center py-4">
-            {/* Logo/Title */}
-            <div className="flex items-center space-x-3">
-              <div className="w-10 h-10 bg-gradient-to-br from-purple-600 to-indigo-600 rounded-lg flex items-center justify-center">
-                <span className="text-white font-bold text-xl">✓</span>
-              </div>
-              <div>
-                <h1 className="text-2xl font-bold text-gray-900">Verifier Portal</h1>
-                <p className="text-xs text-gray-500">Request & Verify Proofs</p>
-              </div>
-            </div>
-
-            {/* Navigation */}
-            <nav className="hidden md:flex items-center space-x-6">
-              <button
-                onClick={() => router.push('/dashboard')}
-                className="text-sm font-medium text-gray-600 hover:text-gray-900 transition-colors"
-              >
-                Dashboard
-              </button>
-              <button
-                onClick={() => router.push('/verifier')}
-                className="text-sm font-medium text-indigo-600 hover:text-indigo-700 transition-colors"
-              >
-                Verify
-              </button>
-              <button
-                onClick={() => router.push('/settings')}
-                className="text-sm font-medium text-gray-600 hover:text-gray-900 transition-colors"
-              >
-                Settings
-              </button>
-            </nav>
-
-            {/* User Menu */}
-            <div className="flex items-center space-x-4">
-              <button
-                onClick={handleLogout}
-                className="px-4 py-2 text-sm font-medium text-gray-700 hover:text-gray-900 hover:bg-gray-100 rounded-lg transition-colors"
-              >
-                Logout
-              </button>
+    <GradientBG>
+      <div className={styles.main} style={{ padding: '2rem', minHeight: '100vh' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', width: '100%', maxWidth: '1200px', marginBottom: '2rem' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
+            <Image src={heroMinaLogo} alt="Mina" width={50} height={50} style={{ filter: 'invert(0.7)', mixBlendMode: 'difference' }} />
+            <div>
+              <h1 style={{ fontFamily: 'var(--font-monument-bold)', fontSize: '1.5rem', color: '#fff' }}>Verifier Portal</h1>
+              <p style={{ fontFamily: 'var(--font-monument-light)', fontSize: '0.75rem', color: 'rgba(255,255,255,0.8)' }}>Upload & Verify ZK Proofs</p>
             </div>
           </div>
-        </div>
-      </header>
-
-      {/* Main Content */}
-      <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-        {/* Welcome Banner */}
-        <div className="mb-8 bg-gradient-to-r from-purple-600 to-indigo-600 rounded-xl shadow-lg p-6 text-white">
-          <h2 className="text-2xl font-bold mb-2">
-            Verification Portal 🔍
-          </h2>
-          <p className="text-purple-100">
-            Request zero-knowledge proofs or scan QR codes to verify credentials without accessing private data.
-          </p>
-        </div>
-
-        {/* Tabs */}
-        <div className="mb-6 bg-white rounded-xl shadow-lg p-2 flex space-x-2">
-          <button
-            onClick={() => setActiveTab('request')}
-            className={`flex-1 px-4 py-3 rounded-lg font-medium transition-all ${
-              activeTab === 'request'
-                ? 'bg-indigo-600 text-white shadow-md'
-                : 'text-gray-600 hover:bg-gray-100'
-            }`}
-          >
-            <span className="mr-2">📋</span>
-            Create Request
-          </button>
-          <button
-            onClick={() => setActiveTab('scan')}
-            className={`flex-1 px-4 py-3 rounded-lg font-medium transition-all ${
-              activeTab === 'scan'
-                ? 'bg-indigo-600 text-white shadow-md'
-                : 'text-gray-600 hover:bg-gray-100'
-            }`}
-          >
-            <span className="mr-2">📷</span>
-            Scan Proof
-          </button>
-          <button
-            onClick={() => setActiveTab('history')}
-            className={`flex-1 px-4 py-3 rounded-lg font-medium transition-all ${
-              activeTab === 'history'
-                ? 'bg-indigo-600 text-white shadow-md'
-                : 'text-gray-600 hover:bg-gray-100'
-            }`}
-          >
-            <span className="mr-2">📊</span>
-            History
-          </button>
-        </div>
-
-        {/* Tab Content */}
-        <div className="space-y-6">
-          {activeTab === 'request' && (
-            <ProofRequestCard />
-          )}
-
-          {activeTab === 'scan' && (
-            <ProofScannerCard onVerificationComplete={handleVerificationComplete} />
-          )}
-
-          {activeTab === 'history' && (
-            <VerificationHistoryCard key={refreshTrigger} />
-          )}
-        </div>
-
-        {/* Info Banner */}
-        <div className="mt-8 bg-gradient-to-r from-blue-50 to-indigo-50 rounded-xl shadow-lg p-6 border border-blue-200">
-          <h3 className="text-lg font-bold text-gray-900 mb-4 flex items-center">
-            <span className="mr-2">ℹ️</span> How Verification Works
-          </h3>
-          
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-            <div>
-              <div className="w-12 h-12 bg-indigo-100 rounded-full flex items-center justify-center mb-3">
-                <span className="text-2xl">1️⃣</span>
-              </div>
-              <h4 className="font-semibold text-gray-900 mb-1">Create Request</h4>
-              <p className="text-sm text-gray-600">
-                Specify what you need to verify (e.g., age 18+, KYC status)
-              </p>
-            </div>
-
-            <div>
-              <div className="w-12 h-12 bg-purple-100 rounded-full flex items-center justify-center mb-3">
-                <span className="text-2xl">2️⃣</span>
-              </div>
-              <h4 className="font-semibold text-gray-900 mb-1">Share or Scan</h4>
-              <p className="text-sm text-gray-600">
-                Share QR code or scan user's proof to receive their ZK proof
-              </p>
-            </div>
-
-            <div>
-              <div className="w-12 h-12 bg-green-100 rounded-full flex items-center justify-center mb-3">
-                <span className="text-2xl">3️⃣</span>
-              </div>
-              <h4 className="font-semibold text-gray-900 mb-1">Verify On-Chain</h4>
-              <p className="text-sm text-gray-600">
-                Cryptographically verify the proof without seeing private data
-              </p>
-            </div>
+          <div style={{ display: 'flex', gap: '0.5rem' }}>
+            <button onClick={() => router.push('/dashboard')} className={styles.card} style={{ padding: '0.5rem 1rem', minHeight: 'auto', width: 'auto' }}>
+              <h2 style={{ marginBottom: 0, fontSize: '0.875rem' }}><span>Dashboard</span></h2>
+            </button>
+            <button onClick={handleLogout} className={styles.card} style={{ padding: '0.5rem 1rem', minHeight: 'auto', width: 'auto' }}>
+              <h2 style={{ marginBottom: 0, fontSize: '0.875rem' }}><span>Logout</span></h2>
+            </button>
           </div>
         </div>
 
-        {/* Footer Info */}
-        <div className="mt-8 text-center text-sm text-gray-500">
-          <p>
-            🔒 Zero-knowledge proofs allow verification without exposing sensitive information.
-          </p>
+        <p className={styles.tagline}>ZERO-KNOWLEDGE PROOF VERIFICATION</p>
+        <p className={styles.start}>Upload a proof file to verify its authenticity</p>
+
+        <div style={{ background: 'rgba(255,255,255,0.95)', borderRadius: '4px', border: '1px solid #2d2d2d', padding: '2rem', width: '100%', maxWidth: '600px', marginTop: '2rem' }}>
+          {!verificationResult ? (
+            <>
+              <div style={{ marginBottom: '1.5rem' }}>
+                <label style={{ fontFamily: 'var(--font-monument-bold)', fontSize: '0.875rem', marginBottom: '0.5rem', display: 'block' }}>UPLOAD PROOF FILE</label>
+                <div style={{ border: '2px dashed #ccc', borderRadius: '4px', padding: '2rem', textAlign: 'center', cursor: 'pointer', background: proofFile ? '#e8f5e9' : '#fafafa' }}>
+                  <input type="file" accept=".json" onChange={handleFileUpload} style={{ display: 'none' }} id="proof-file" />
+                  <label htmlFor="proof-file" style={{ cursor: 'pointer' }}>
+                    {proofFile ? (
+                      <><span style={{ fontSize: '2rem' }}>✓</span><p style={{ fontFamily: 'var(--font-monument)', marginTop: '0.5rem' }}>{proofFile.name}</p></>
+                    ) : (
+                      <><span style={{ fontSize: '2rem' }}>📄</span><p style={{ fontFamily: 'var(--font-monument)', marginTop: '0.5rem' }}>Click to upload JSON proof</p></>
+                    )}
+                  </label>
+                </div>
+              </div>
+
+              {proofData && (
+                <div style={{ background: '#f5f5f5', borderRadius: '4px', padding: '1rem', marginBottom: '1.5rem' }}>
+                  <p style={{ fontFamily: 'var(--font-monument-bold)', fontSize: '0.75rem' }}>PROOF TYPE: {proofData.proofType || proofData.type || 'Unknown'}</p>
+                  {proofData.did && <p style={{ fontFamily: 'monospace', fontSize: '0.75rem', marginTop: '0.5rem' }}>DID: {proofData.did.substring(0, 30)}...</p>}
+                </div>
+              )}
+
+              {proofData?.selectiveDisclosure && (
+                <div style={{ marginBottom: '1.5rem' }}>
+                  <p style={{ fontFamily: 'var(--font-monument-bold)', fontSize: '0.875rem', marginBottom: '1rem' }}>VERIFY CREDENTIALS</p>
+                  <input type="text" value={expectedName} onChange={(e) => setExpectedName(e.target.value)} placeholder="Expected Name" style={{ width: '100%', padding: '0.75rem', border: '1px solid #ccc', borderRadius: '4px', marginBottom: '0.5rem' }} />
+                  <input type="text" value={expectedCitizenship} onChange={(e) => setExpectedCitizenship(e.target.value)} placeholder="Expected Citizenship (e.g., India)" style={{ width: '100%', padding: '0.75rem', border: '1px solid #ccc', borderRadius: '4px' }} />
+                </div>
+              )}
+
+              {error && <div style={{ background: '#FEE2E2', border: '1px solid #FCA5A5', borderRadius: '4px', padding: '0.75rem', marginBottom: '1rem', color: '#DC2626', fontSize: '0.875rem' }}>{error}</div>}
+
+              <button onClick={handleVerify} disabled={!proofData || isVerifying} className={styles.card} style={{ width: '100%', margin: 0, opacity: (!proofData || isVerifying) ? 0.5 : 1 }}>
+                <h2><span>{isVerifying ? '⏳ Verifying...' : '✓ Verify Proof'}</span><span>→</span></h2>
+                <p>Cryptographically verify the proof on-chain</p>
+              </button>
+            </>
+          ) : (
+            <>
+              <div style={{ textAlign: 'center', marginBottom: '1.5rem' }}>
+                <span style={{ fontSize: '4rem' }}>{verificationResult.status === 'verified' ? '✅' : '❌'}</span>
+                <h3 style={{ fontFamily: 'var(--font-monument-bold)', fontSize: '1.5rem', color: verificationResult.status === 'verified' ? '#2e7d32' : '#c62828', marginTop: '1rem' }}>
+                  {verificationResult.status === 'verified' ? 'PROOF VERIFIED' : 'VERIFICATION FAILED'}
+                </h3>
+              </div>
+
+              <div style={{ background: '#f5f5f5', borderRadius: '4px', padding: '1rem', marginBottom: '1rem' }}>
+                <p><span style={{ fontFamily: 'var(--font-monument-light)', fontSize: '0.75rem' }}>Type: </span><strong>{verificationResult.proofType}</strong></p>
+                {verificationResult.txHash && <p style={{ marginTop: '0.5rem' }}><span style={{ fontFamily: 'var(--font-monument-light)', fontSize: '0.75rem' }}>TX: </span><code style={{ fontSize: '0.7rem' }}>{verificationResult.txHash.substring(0, 20)}...</code></p>}
+              </div>
+
+              {verificationResult.credentialChecks && Object.keys(verificationResult.credentialChecks).length > 0 && (
+                <div style={{ marginBottom: '1rem' }}>
+                  <p style={{ fontFamily: 'var(--font-monument-bold)', fontSize: '0.875rem', marginBottom: '0.5rem' }}>CREDENTIAL CHECKS</p>
+                  {verificationResult.credentialChecks.name && (
+                    <div style={{ padding: '0.5rem', background: verificationResult.credentialChecks.name.matches ? '#e8f5e9' : '#ffebee', borderRadius: '4px', marginBottom: '0.5rem' }}>
+                      {verificationResult.credentialChecks.name.matches ? '✅' : '❌'} Name: {verificationResult.credentialChecks.name.expected}
+                    </div>
+                  )}
+                  {verificationResult.credentialChecks.citizenship && (
+                    <div style={{ padding: '0.5rem', background: verificationResult.credentialChecks.citizenship.matches ? '#e8f5e9' : '#ffebee', borderRadius: '4px' }}>
+                      {verificationResult.credentialChecks.citizenship.matches ? '✅' : '❌'} Citizenship: {verificationResult.credentialChecks.citizenship.expected}
+                    </div>
+                  )}
+                </div>
+              )}
+
+              <button onClick={handleReset} className={styles.card} style={{ width: '100%', margin: 0 }}>
+                <h2><span>🔄 Verify Another</span><span>→</span></h2>
+                <p>Upload a new proof file</p>
+              </button>
+            </>
+          )}
         </div>
-      </main>
-    </div>
+
+        {history.length > 0 && (
+          <div style={{ background: 'rgba(255,255,255,0.95)', borderRadius: '4px', border: '1px solid #2d2d2d', padding: '1.5rem', width: '100%', maxWidth: '600px', marginTop: '2rem' }}>
+            <h3 style={{ fontFamily: 'var(--font-monument-bold)', fontSize: '0.875rem', marginBottom: '1rem' }}>RECENT VERIFICATIONS</h3>
+            {history.slice(0, 5).map((item, i) => (
+              <div key={i} style={{ display: 'flex', justifyContent: 'space-between', padding: '0.75rem', background: '#f5f5f5', borderRadius: '4px', marginBottom: '0.5rem' }}>
+                <span>{item.status === 'verified' ? '✅' : '❌'} {item.proofType}</span>
+                <span style={{ fontSize: '0.75rem', color: '#666' }}>{new Date(item.timestamp).toLocaleDateString()}</span>
+              </div>
+            ))}
+          </div>
+        )}
+
+        <div style={{ marginTop: '3rem', textAlign: 'center', fontFamily: 'var(--font-monument-light)', fontSize: '0.75rem', color: 'rgba(255,255,255,0.7)' }}>
+          🔒 Zero-knowledge proofs verify claims without exposing sensitive data.
+        </div>
+      </div>
+    </GradientBG>
   );
 }

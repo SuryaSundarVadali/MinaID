@@ -172,22 +172,48 @@ export function ProfileCard({ session }: ProfileCardProps) {
             <p className="font-semibold text-gray-900 capitalize text-sm sm:text-base">
               {session.primaryWallet}
             </p>
+            {walletInfo?.address && (
+              <p className="font-mono text-xs text-gray-500 mt-1">
+                {truncateAddress(walletInfo.address)}
+              </p>
+            )}
           </div>
         </div>
 
-        <div>
+        <div className="col-span-1 sm:col-span-2">
           <label className="text-xs sm:text-sm font-medium text-gray-600 mb-1 block">
             Linked Wallets
           </label>
           <div className="bg-white rounded-lg p-2 sm:p-3 border border-gray-200">
-            <div className="flex flex-wrap gap-1">
+            <div className="space-y-2">
               {session.wallets.map(wallet => (
-                <span
+                <div
                   key={wallet.type}
-                  className="px-2 py-1 bg-blue-100 text-blue-700 rounded text-xs font-medium"
+                  className="flex items-center justify-between p-2 bg-gray-50 rounded-lg"
                 >
-                  {wallet.type}
-                </span>
+                  <div className="flex items-center gap-2">
+                    <span className="px-2 py-1 bg-blue-100 text-blue-700 rounded text-xs font-medium">
+                      {wallet.type}
+                    </span>
+                    {wallet.isLinked && (
+                      <span className="w-2 h-2 bg-green-500 rounded-full" title="Linked"></span>
+                    )}
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <span className="font-mono text-xs text-gray-600">
+                      {wallet.address ? truncateAddress(wallet.address) : 'Not connected'}
+                    </span>
+                    {wallet.address && (
+                      <button
+                        onClick={() => copyToClipboard(wallet.address)}
+                        className="p-1 hover:bg-gray-200 rounded transition-colors"
+                        title="Copy address"
+                      >
+                        <span className="text-xs">{copied ? '✓' : '📋'}</span>
+                      </button>
+                    )}
+                  </div>
+                </div>
               ))}
             </div>
           </div>
