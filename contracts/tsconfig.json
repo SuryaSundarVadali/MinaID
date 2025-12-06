@@ -22,5 +22,6 @@
     "importHelpers": true, // bundle optimization to reduce size
     "baseUrl": "." // base directory for module resolution
   },
-  "include": ["./src", "./scripts"]
+  "include": ["./src", "./scripts"],
+  "exclude": ["./build", "node_modules"]
 }

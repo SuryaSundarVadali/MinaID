@@ -1,5 +1,11 @@
-ui/public/cache/
-ui/public/cache/
+# Cache files (large binary files for ZK proofs)
+ui/public/cache/*.header
+ui/public/cache/step-*
+ui/public/cache/wrap-*
+ui/public/cache/srs-*
+ui/public/cache/lagrange-*
+# Keep cache.json for file list
+!ui/public/cache.json
 .vercel
 server/public/cache/
 server/node_modules/

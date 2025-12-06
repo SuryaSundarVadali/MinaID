@@ -25,10 +25,102 @@ import {
   MerkleMapWitness,
   Poseidon,
   Scalar,
+  Cache,
 } from 'o1js';
 
-import { DIDRegistry } from '@contracts/DIDRegistry';
-import { ZKPVerifier } from '@contracts/ZKPVerifier';
+// In-memory cache for browser that pre-fetches all cache files
+const cacheStore: Map<string, { header: string; data: Uint8Array }> = new Map();
+let cacheInitialized = false;
+
+/**
+ * Pre-fetch cache files from public/cache directory
+ * Must be called before compilation
+ */
+async function initializeCache(cacheDirectory: string): Promise<void> {
+  if (cacheInitialized) return;
+  
+  console.log('[Cache] Pre-fetching cache files...');
+  
+  try {
+    // Fetch the cache.json to know what files to load
+    const cacheListRes = await fetch('/cache.json');
+    if (!cacheListRes.ok) {
+      console.warn('[Cache] cache.json not found, will compile from scratch');
+      cacheInitialized = true;
+      return;
+    }
+    
+    const cacheList = await cacheListRes.json();
+    const files = cacheList.files || [];
+    
+    console.log(`[Cache] Found ${files.length} cache files to load`);
+    
+    // Fetch all cache files in parallel
+    await Promise.all(files.map(async (filename: string) => {
+      try {
+        const dataUrl = `${cacheDirectory}/${filename}`;
+        const headerUrl = `${dataUrl}.header`;
+        
+        const [headerRes, dataRes] = await Promise.all([
+          fetch(headerUrl),
+          fetch(dataUrl),
+        ]);
+        
+        if (!headerRes.ok || !dataRes.ok) {
+          console.warn(`[Cache] Could not fetch ${filename}`);
+          return;
+        }
+        
+        const header = await headerRes.text();
+        const dataText = await dataRes.text();
+        const data = new Uint8Array(dataText.split(',').map(Number));
+        
+        cacheStore.set(filename, { header, data });
+        console.log(`[Cache] Loaded: ${filename}`);
+      } catch (e) {
+        console.warn(`[Cache] Error loading ${filename}:`, e);
+      }
+    }));
+    
+    cacheInitialized = true;
+    console.log(`[Cache] Loaded ${cacheStore.size} cache files into memory`);
+  } catch (e) {
+    console.warn('[Cache] Error initializing cache:', e);
+    cacheInitialized = true;
+  }
+}
+
+// Create a synchronous cache that reads from pre-loaded memory store
+const createBrowserCache = (): Cache => ({
+  read({ persistentId, uniqueId, dataType }) {
+    const cached = cacheStore.get(persistentId);
+    if (!cached) {
+      console.log(`[Cache] Miss: ${persistentId}`);
+      return undefined;
+    }
+    
+    // Parse header to verify uniqueId and dataType
+    const [storedUniqueId, storedDataType] = cached.header.split('\n');
+    if (storedUniqueId !== uniqueId || storedDataType !== dataType) {
+      console.log(`[Cache] Mismatch for ${persistentId}: expected ${uniqueId}/${dataType}, got ${storedUniqueId}/${storedDataType}`);
+      return undefined;
+    }
+    
+    console.log(`[Cache] Hit: ${persistentId}`);
+    return cached.data;
+  },
+  write({ persistentId }) {
+    console.log(`[Cache] Write (ignored in browser): ${persistentId}`);
+  },
+  canWrite: false,
+});
+
+// Import contracts from local copies (bundled with UI for Vercel deployment)
+import { DIDRegistry } from './contracts/DIDRegistry';
+import { ZKPVerifier } from './contracts/ZKPVerifier';
+
+// Re-export for use by other modules
+export { DIDRegistry, ZKPVerifier };
 
 // Default configuration for devnet
 export const DEFAULT_CONFIG: NetworkConfig = {
@@ -78,9 +170,10 @@ export interface DIDStatus {
 export class ContractInterface {
   private network: ReturnType<typeof Mina.Network>;
   private networkConfig: NetworkConfig;
-  private didRegistry?: DIDRegistry;
-  private zkpVerifier?: ZKPVerifier;
+  private didRegistry?: any; // DIDRegistry type loaded dynamically
+  private zkpVerifier?: any; // ZKPVerifier type loaded dynamically
   private isCompiled = false;
+  private contractsAvailable = false;
 
   constructor(config: NetworkConfig) {
     this.networkConfig = config;
@@ -107,23 +200,46 @@ export class ContractInterface {
       // Instantiate contracts without compiling immediately to prevent UI freezing on load
       this.didRegistry = new DIDRegistry(PublicKey.fromBase58(this.networkConfig.didRegistryAddress));
       this.zkpVerifier = new ZKPVerifier(PublicKey.fromBase58(this.networkConfig.zkpVerifierAddress));
+      this.contractsAvailable = true;
       
       console.log('[ContractInterface] ✅ Interface ready (Lazy compilation enabled)');
     } catch (error) {
       console.error('[ContractInterface] Failed to initialize contracts:', error);
+      this.contractsAvailable = false;
     }
   }
 
   /**
+   * Check if contracts are available
+   */
+  areContractsAvailable(): boolean {
+    return this.contractsAvailable;
+  }
+
+  /**
    * Ensure contracts are compiled before transaction generation
+   * Uses cached prover keys from /cache directory
    */
   async ensureCompiled() {
+    if (!this.contractsAvailable) {
+      throw new Error('Contracts not available - blockchain features disabled');
+    }
     if (this.isCompiled) return;
-    console.log('[ContractInterface] Compiling contracts... (this may take a minute)');
+    console.log('[ContractInterface] Compiling contracts with cache... (this may take a minute)');
     console.time('Contract Compilation');
     try {
-      await DIDRegistry.compile();
-      await ZKPVerifier.compile();
+      // Pre-fetch cache files into memory
+      await initializeCache('/cache');
+      
+      // Create browser cache from pre-loaded data
+      const cache = createBrowserCache();
+      
+      console.log('[ContractInterface] Compiling DIDRegistry...');
+      await DIDRegistry.compile({ cache });
+      
+      console.log('[ContractInterface] Compiling ZKPVerifier...');
+      await ZKPVerifier.compile({ cache });
+      
       this.isCompiled = true;
       console.log('[ContractInterface] Contracts compiled successfully');
     } catch (error) {

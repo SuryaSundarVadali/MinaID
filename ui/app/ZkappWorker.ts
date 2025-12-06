@@ -1,10 +1,97 @@
-import { Mina, PublicKey, fetchAccount, Field, MerkleWitness, Poseidon } from 'o1js';
+import { Mina, PublicKey, fetchAccount, Field, MerkleWitness, Poseidon, Cache } from 'o1js';
 import * as Comlink from "comlink";
-import { DIDRegistry } from '@contracts/DIDRegistry';
-import { ZKPVerifier } from '@contracts/ZKPVerifier';
-import { AgeVerificationProgram } from '@contracts/AgeVerificationProgram';
+import { DIDRegistry } from '../lib/contracts/DIDRegistry';
+import { ZKPVerifier } from '../lib/contracts/ZKPVerifier';
+import { AgeVerificationProgram } from '../lib/contracts/AgeVerificationProgram';
 
 type Transaction = Awaited<ReturnType<typeof Mina.transaction>>;
+
+// In-memory cache store for browser/worker
+const cacheStore: Map<string, { header: string; data: Uint8Array }> = new Map();
+let cacheInitialized = false;
+
+/**
+ * Pre-fetch cache files from public/cache directory into memory
+ * Must be called before compilation
+ */
+async function initializeCache(cacheDirectory: string): Promise<void> {
+  if (cacheInitialized) return;
+  
+  console.log('[Worker Cache] Pre-fetching cache files...');
+  
+  try {
+    // Fetch the cache.json to know what files to load
+    const cacheListRes = await fetch('/cache.json');
+    if (!cacheListRes.ok) {
+      console.warn('[Worker Cache] cache.json not found, will compile from scratch');
+      cacheInitialized = true;
+      return;
+    }
+    
+    const cacheList = await cacheListRes.json();
+    const files = cacheList.files || [];
+    
+    console.log(`[Worker Cache] Found ${files.length} cache files to load`);
+    
+    // Fetch all cache files in parallel
+    await Promise.all(files.map(async (filename: string) => {
+      try {
+        const dataUrl = `${cacheDirectory}/${filename}`;
+        const headerUrl = `${dataUrl}.header`;
+        
+        const [headerRes, dataRes] = await Promise.all([
+          fetch(headerUrl),
+          fetch(dataUrl),
+        ]);
+        
+        if (!headerRes.ok || !dataRes.ok) {
+          console.warn(`[Worker Cache] Could not fetch ${filename}`);
+          return;
+        }
+        
+        const header = await headerRes.text();
+        const dataText = await dataRes.text();
+        const data = new Uint8Array(dataText.split(',').map(Number));
+        
+        cacheStore.set(filename, { header, data });
+        console.log(`[Worker Cache] Loaded: ${filename}`);
+      } catch (e) {
+        console.warn(`[Worker Cache] Error loading ${filename}:`, e);
+      }
+    }));
+    
+    cacheInitialized = true;
+    console.log(`[Worker Cache] Loaded ${cacheStore.size} cache files into memory`);
+  } catch (e) {
+    console.warn('[Worker Cache] Error initializing cache:', e);
+    cacheInitialized = true;
+  }
+}
+
+// Create a synchronous cache that reads from pre-loaded memory store
+const createBrowserCache = (): Cache => ({
+  read({ persistentId, uniqueId, dataType }) {
+    const cached = cacheStore.get(persistentId);
+    if (!cached) {
+      console.log(`[Worker Cache] Miss: ${persistentId}`);
+      return undefined;
+    }
+    
+    // Parse header to verify uniqueId and dataType
+    const [storedUniqueId, storedDataType] = cached.header.split('\n');
+    if (storedUniqueId !== uniqueId || storedDataType !== dataType) {
+      console.log(`[Worker Cache] Mismatch for ${persistentId}`);
+      return undefined;
+    }
+    
+    console.log(`[Worker Cache] Hit: ${persistentId}`);
+    return cached.data;
+  },
+  write({ persistentId }) {
+    console.log(`[Worker Cache] Write (ignored in browser): ${persistentId}`);
+  },
+  canWrite: false,
+});
 
 const state = {
   DIDRegistryInstance: DIDRegistry,
@@ -12,7 +99,8 @@ const state = {
   AgeVerificationProgramInstance: AgeVerificationProgram,
   didRegistryContract: null as null | DIDRegistry,
   zkpVerifierContract: null as null | ZKPVerifier,
-  transaction: null as null | Transaction
+  transaction: null as null | Transaction,
+  cache: null as null | Cache,
 };
 
 export const api = {
@@ -39,23 +127,30 @@ export const api = {
     state.DIDRegistryInstance = DIDRegistry;
     state.ZKPVerifierInstance = ZKPVerifier;
     state.AgeVerificationProgramInstance = AgeVerificationProgram;
+    
+    // Pre-fetch cache files into memory
+    await initializeCache('/cache');
+    
+    // Create browser cache from pre-loaded data
+    state.cache = createBrowserCache();
+    console.log("Cache initialized from memory store");
   },
 
   async compileAgeVerificationProgram() {
-    console.log("Compiling AgeVerificationProgram...");
-    await state.AgeVerificationProgramInstance.compile();
+    console.log("Compiling AgeVerificationProgram with cache...");
+    await state.AgeVerificationProgramInstance.compile({ cache: state.cache! });
     console.log("AgeVerificationProgram compiled");
   },
 
   async compileDIDRegistry() {
-    console.log("Compiling DIDRegistry contract...");
-    await state.DIDRegistryInstance.compile();
+    console.log("Compiling DIDRegistry contract with cache...");
+    await state.DIDRegistryInstance.compile({ cache: state.cache! });
     console.log("DIDRegistry contract compiled");
   },
 
   async compileZKPVerifier() {
-    console.log("Compiling ZKPVerifier contract...");
-    await state.ZKPVerifierInstance.compile();
+    console.log("Compiling ZKPVerifier contract with cache...");
+    await state.ZKPVerifierInstance.compile({ cache: state.cache! });
     console.log("ZKPVerifier contract compiled");
   },
 
