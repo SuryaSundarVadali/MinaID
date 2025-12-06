@@ -33,76 +33,17 @@ const cacheStore: Map<string, { header: string; data: Uint8Array }> = new Map();
 let cacheInitialized = false;
 
 /**
- * Pre-fetch cache files from CDN or local directory
- * Must be called before compilation
- * 
- * Note: If cache files are not available, contracts will compile from scratch
- * which takes ~2-3 minutes but produces valid proofs.
+ * Pre-fetch cache files - currently disabled as cache files are not deployed
+ * Contracts will compile from scratch (~2-3 minutes)
  */
-async function initializeCache(cacheDirectory: string): Promise<void> {
+async function initializeCache(_cacheDirectory: string): Promise<void> {
   if (cacheInitialized) return;
   
-  console.log('[Cache] Checking for cache files...');
-  
-  try {
-    // Try to fetch cache.json to know what files to load
-    const cacheListRes = await fetch('/cache.json');
-    if (!cacheListRes.ok) {
-      console.log('[Cache] No cache available - contracts will compile from scratch (this takes ~2-3 minutes)');
-      cacheInitialized = true;
-      return;
-    }
-    
-    const cacheList = await cacheListRes.json();
-    const files = cacheList.files || [];
-    
-    if (files.length === 0) {
-      console.log('[Cache] Empty cache list - compiling from scratch');
-      cacheInitialized = true;
-      return;
-    }
-    
-    console.log(`[Cache] Found ${files.length} cache files, attempting to load...`);
-    
-    // Fetch cache files - but don't fail if they're not available
-    let loadedCount = 0;
-    await Promise.all(files.map(async (filename: string) => {
-      try {
-        const dataUrl = `${cacheDirectory}/${filename}`;
-        const headerUrl = `${dataUrl}.header`;
-        
-        const [headerRes, dataRes] = await Promise.all([
-          fetch(headerUrl),
-          fetch(dataUrl),
-        ]);
-        
-        if (!headerRes.ok || !dataRes.ok) {
-          // Silently skip unavailable files
-          return;
-        }
-        
-        const header = await headerRes.text();
-        const dataText = await dataRes.text();
-        const data = new Uint8Array(dataText.split(',').map(Number));
-        
-        cacheStore.set(filename, { header, data });
-        loadedCount++;
-      } catch (e) {
-        // Silently skip files that fail to load
-      }
-    }));
-    
-    cacheInitialized = true;
-    
-    if (loadedCount > 0) {
-      console.log(`[Cache] Loaded ${loadedCount} cache files into memory`);
-    } else {
-      console.log('[Cache] No cache files available - contracts will compile from scratch (this takes ~2-3 minutes)');
-    }
-  } catch (e) {
-    console.log('[Cache] Cache initialization skipped - compiling from scratch');
-    cacheInitialized = true;
-  }
+  // Cache files are not deployed to Vercel (too large - 1.4GB)
+  // Contracts will compile from scratch which takes ~2-3 minutes
+  // but produces valid proofs
+  console.log('[Cache] Cache not available - contracts will compile from scratch (2-3 minutes)');
+  cacheInitialized = true;
 }
 
 // Create a synchronous cache that reads from pre-loaded memory store
