@@ -25,11 +25,15 @@ import {
   MerkleMapWitness,
   Poseidon,
   Scalar,
+  Cache,
 } from 'o1js';
 
 // Import contracts from local copies (bundled with UI for Vercel deployment)
 import { DIDRegistry } from './contracts/DIDRegistry';
 import { ZKPVerifier } from './contracts/ZKPVerifier';
+
+// Import browser cache utilities
+import { initializeBrowserCache } from './BrowserCache';
 
 // Re-export for use by other modules
 export { DIDRegistry, ZKPVerifier };
@@ -130,7 +134,7 @@ export class ContractInterface {
 
   /**
    * Ensure contracts are compiled before transaction generation
-   * Uses cached prover keys from /cache directory
+   * Uses cached prover keys from /cache directory for consistent verification keys
    */
   async ensureCompiled() {
     if (!this.contractsAvailable) {
@@ -138,24 +142,26 @@ export class ContractInterface {
     }
     if (this.isCompiled) return;
     
-    console.log('[ContractInterface] Compiling contracts from scratch...');
-    console.log('[ContractInterface] This will take 2-3 minutes. Please wait...');
+    console.log('[ContractInterface] Loading prover key cache from /cache/...');
+    console.log('[ContractInterface] This ensures verification keys match deployed contracts');
     console.time('Contract Compilation');
     
     try {
-      // Compile without cache - this generates prover keys from scratch
-      // Takes longer but produces valid proofs
+      // Initialize browser cache - this fetches pre-computed prover keys from /cache/
+      // These keys MUST match the keys used when deploying the contracts
+      const cache = await initializeBrowserCache();
+      console.log('[ContractInterface] Cache loaded, compiling contracts...');
       
-      console.log('[ContractInterface] Compiling DIDRegistry...');
-      const didRegistryResult = await DIDRegistry.compile();
+      console.log('[ContractInterface] Compiling DIDRegistry with cache...');
+      const didRegistryResult = await DIDRegistry.compile({ cache });
       console.log('[ContractInterface] DIDRegistry compiled, verification key:', didRegistryResult.verificationKey.hash.toString().slice(0, 10) + '...');
       
-      console.log('[ContractInterface] Compiling ZKPVerifier...');
-      const zkpVerifierResult = await ZKPVerifier.compile();
+      console.log('[ContractInterface] Compiling ZKPVerifier with cache...');
+      const zkpVerifierResult = await ZKPVerifier.compile({ cache });
       console.log('[ContractInterface] ZKPVerifier compiled, verification key:', zkpVerifierResult.verificationKey.hash.toString().slice(0, 10) + '...');
       
       this.isCompiled = true;
-      console.log('[ContractInterface] ✅ All contracts compiled successfully');
+      console.log('[ContractInterface] ✅ All contracts compiled successfully with cached keys');
     } catch (error) {
       console.error('[ContractInterface] Compilation failed:', error);
       throw error;
