@@ -25,51 +25,7 @@ import {
   MerkleMapWitness,
   Poseidon,
   Scalar,
-  Cache,
 } from 'o1js';
-
-// In-memory cache for browser that pre-fetches all cache files
-const cacheStore: Map<string, { header: string; data: Uint8Array }> = new Map();
-let cacheInitialized = false;
-
-/**
- * Pre-fetch cache files - currently disabled as cache files are not deployed
- * Contracts will compile from scratch (~2-3 minutes)
- */
-async function initializeCache(_cacheDirectory: string): Promise<void> {
-  if (cacheInitialized) return;
-  
-  // Cache files are not deployed to Vercel (too large - 1.4GB)
-  // Contracts will compile from scratch which takes ~2-3 minutes
-  // but produces valid proofs
-  console.log('[Cache] Cache not available - contracts will compile from scratch (2-3 minutes)');
-  cacheInitialized = true;
-}
-
-// Create a synchronous cache that reads from pre-loaded memory store
-const createBrowserCache = (): Cache => ({
-  read({ persistentId, uniqueId, dataType }) {
-    const cached = cacheStore.get(persistentId);
-    if (!cached) {
-      console.log(`[Cache] Miss: ${persistentId}`);
-      return undefined;
-    }
-    
-    // Parse header to verify uniqueId and dataType
-    const [storedUniqueId, storedDataType] = cached.header.split('\n');
-    if (storedUniqueId !== uniqueId || storedDataType !== dataType) {
-      console.log(`[Cache] Mismatch for ${persistentId}: expected ${uniqueId}/${dataType}, got ${storedUniqueId}/${storedDataType}`);
-      return undefined;
-    }
-    
-    console.log(`[Cache] Hit: ${persistentId}`);
-    return cached.data;
-  },
-  write({ persistentId }) {
-    console.log(`[Cache] Write (ignored in browser): ${persistentId}`);
-  },
-  canWrite: false,
-});
 
 // Import contracts from local copies (bundled with UI for Vercel deployment)
 import { DIDRegistry } from './contracts/DIDRegistry';
@@ -181,23 +137,25 @@ export class ContractInterface {
       throw new Error('Contracts not available - blockchain features disabled');
     }
     if (this.isCompiled) return;
-    console.log('[ContractInterface] Compiling contracts with cache... (this may take a minute)');
+    
+    console.log('[ContractInterface] Compiling contracts from scratch...');
+    console.log('[ContractInterface] This will take 2-3 minutes. Please wait...');
     console.time('Contract Compilation');
+    
     try {
-      // Pre-fetch cache files into memory
-      await initializeCache('/cache');
-      
-      // Create browser cache from pre-loaded data
-      const cache = createBrowserCache();
+      // Compile without cache - this generates prover keys from scratch
+      // Takes longer but produces valid proofs
       
       console.log('[ContractInterface] Compiling DIDRegistry...');
-      await DIDRegistry.compile({ cache });
+      const didRegistryResult = await DIDRegistry.compile();
+      console.log('[ContractInterface] DIDRegistry compiled, verification key:', didRegistryResult.verificationKey.hash.toString().slice(0, 10) + '...');
       
       console.log('[ContractInterface] Compiling ZKPVerifier...');
-      await ZKPVerifier.compile({ cache });
+      const zkpVerifierResult = await ZKPVerifier.compile();
+      console.log('[ContractInterface] ZKPVerifier compiled, verification key:', zkpVerifierResult.verificationKey.hash.toString().slice(0, 10) + '...');
       
       this.isCompiled = true;
-      console.log('[ContractInterface] Contracts compiled successfully');
+      console.log('[ContractInterface] ✅ All contracts compiled successfully');
     } catch (error) {
       console.error('[ContractInterface] Compilation failed:', error);
       throw error;
