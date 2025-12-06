@@ -33,19 +33,22 @@ const cacheStore: Map<string, { header: string; data: Uint8Array }> = new Map();
 let cacheInitialized = false;
 
 /**
- * Pre-fetch cache files from public/cache directory
+ * Pre-fetch cache files from CDN or local directory
  * Must be called before compilation
+ * 
+ * Note: If cache files are not available, contracts will compile from scratch
+ * which takes ~2-3 minutes but produces valid proofs.
  */
 async function initializeCache(cacheDirectory: string): Promise<void> {
   if (cacheInitialized) return;
   
-  console.log('[Cache] Pre-fetching cache files...');
+  console.log('[Cache] Checking for cache files...');
   
   try {
-    // Fetch the cache.json to know what files to load
+    // Try to fetch cache.json to know what files to load
     const cacheListRes = await fetch('/cache.json');
     if (!cacheListRes.ok) {
-      console.warn('[Cache] cache.json not found, will compile from scratch');
+      console.log('[Cache] No cache available - contracts will compile from scratch (this takes ~2-3 minutes)');
       cacheInitialized = true;
       return;
     }
@@ -53,9 +56,16 @@ async function initializeCache(cacheDirectory: string): Promise<void> {
     const cacheList = await cacheListRes.json();
     const files = cacheList.files || [];
     
-    console.log(`[Cache] Found ${files.length} cache files to load`);
+    if (files.length === 0) {
+      console.log('[Cache] Empty cache list - compiling from scratch');
+      cacheInitialized = true;
+      return;
+    }
     
-    // Fetch all cache files in parallel
+    console.log(`[Cache] Found ${files.length} cache files, attempting to load...`);
+    
+    // Fetch cache files - but don't fail if they're not available
+    let loadedCount = 0;
     await Promise.all(files.map(async (filename: string) => {
       try {
         const dataUrl = `${cacheDirectory}/${filename}`;
@@ -67,7 +77,7 @@ async function initializeCache(cacheDirectory: string): Promise<void> {
         ]);
         
         if (!headerRes.ok || !dataRes.ok) {
-          console.warn(`[Cache] Could not fetch ${filename}`);
+          // Silently skip unavailable files
           return;
         }
         
@@ -76,16 +86,21 @@ async function initializeCache(cacheDirectory: string): Promise<void> {
         const data = new Uint8Array(dataText.split(',').map(Number));
         
         cacheStore.set(filename, { header, data });
-        console.log(`[Cache] Loaded: ${filename}`);
+        loadedCount++;
       } catch (e) {
-        console.warn(`[Cache] Error loading ${filename}:`, e);
+        // Silently skip files that fail to load
       }
     }));
     
     cacheInitialized = true;
-    console.log(`[Cache] Loaded ${cacheStore.size} cache files into memory`);
+    
+    if (loadedCount > 0) {
+      console.log(`[Cache] Loaded ${loadedCount} cache files into memory`);
+    } else {
+      console.log('[Cache] No cache files available - contracts will compile from scratch (this takes ~2-3 minutes)');
+    }
   } catch (e) {
-    console.warn('[Cache] Error initializing cache:', e);
+    console.log('[Cache] Cache initialization skipped - compiling from scratch');
     cacheInitialized = true;
   }
 }

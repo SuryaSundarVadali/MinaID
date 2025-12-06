@@ -17,13 +17,13 @@ let cacheInitialized = false;
 async function initializeCache(cacheDirectory: string): Promise<void> {
   if (cacheInitialized) return;
   
-  console.log('[Worker Cache] Pre-fetching cache files...');
+  console.log('[Worker] Checking for cache files...');
   
   try {
     // Fetch the cache.json to know what files to load
     const cacheListRes = await fetch('/cache.json');
     if (!cacheListRes.ok) {
-      console.warn('[Worker Cache] cache.json not found, will compile from scratch');
+      console.log('[Worker] No cache available - contracts will compile from scratch');
       cacheInitialized = true;
       return;
     }
@@ -31,9 +31,16 @@ async function initializeCache(cacheDirectory: string): Promise<void> {
     const cacheList = await cacheListRes.json();
     const files = cacheList.files || [];
     
-    console.log(`[Worker Cache] Found ${files.length} cache files to load`);
+    if (files.length === 0) {
+      console.log('[Worker] Empty cache list - compiling from scratch');
+      cacheInitialized = true;
+      return;
+    }
     
-    // Fetch all cache files in parallel
+    console.log(`[Worker] Attempting to load ${files.length} cache files...`);
+    
+    // Fetch all cache files in parallel - silently skip unavailable files
+    let loadedCount = 0;
     await Promise.all(files.map(async (filename: string) => {
       try {
         const dataUrl = `${cacheDirectory}/${filename}`;
@@ -45,7 +52,6 @@ async function initializeCache(cacheDirectory: string): Promise<void> {
         ]);
         
         if (!headerRes.ok || !dataRes.ok) {
-          console.warn(`[Worker Cache] Could not fetch ${filename}`);
           return;
         }
         
@@ -54,16 +60,21 @@ async function initializeCache(cacheDirectory: string): Promise<void> {
         const data = new Uint8Array(dataText.split(',').map(Number));
         
         cacheStore.set(filename, { header, data });
-        console.log(`[Worker Cache] Loaded: ${filename}`);
+        loadedCount++;
       } catch (e) {
-        console.warn(`[Worker Cache] Error loading ${filename}:`, e);
+        // Silently skip
       }
     }));
     
     cacheInitialized = true;
-    console.log(`[Worker Cache] Loaded ${cacheStore.size} cache files into memory`);
+    
+    if (loadedCount > 0) {
+      console.log(`[Worker] Loaded ${loadedCount} cache files`);
+    } else {
+      console.log('[Worker] No cache files available - compiling from scratch (2-3 minutes)');
+    }
   } catch (e) {
-    console.warn('[Worker Cache] Error initializing cache:', e);
+    console.log('[Worker] Cache check skipped - compiling from scratch');
     cacheInitialized = true;
   }
 }

@@ -1,0 +1,17 @@
+# Ignore large cache files
+public/cache/*.header
+public/cache/step-*
+public/cache/wrap-*
+public/cache/srs-*
+public/cache/lagrange-*
+
+# Keep cache.json
+!public/cache.json
+
+# Node modules are handled automatically
+node_modules/
+
+# Test files
+__tests__/
+*.test.ts
+*.test.tsx
