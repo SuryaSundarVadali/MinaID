@@ -2,7 +2,7 @@
  * BrowserCache.ts
  * 
  * Browser-compatible cache implementation for o1js prover keys.
- * Fetches cached files from /cache/ directory and provides them to o1js compile.
+ * Fetches cached files from GitHub releases to avoid Git LFS issues on Vercel.
  * 
  * This is essential for ensuring browser-compiled contracts use the SAME
  * verification keys as the deployed on-chain contracts.
@@ -12,6 +12,9 @@ import { Cache } from 'o1js';
 
 // Import cache file list
 import cacheJSONList from '../app/cache.json';
+
+// GitHub release URL for cache files
+const GITHUB_RELEASE_BASE_URL = 'https://github.com/SuryaSundarVadali/MinaID/releases/download/cache-v1';
 
 interface CacheFile {
   file: string;
@@ -24,21 +27,22 @@ interface CacheFiles {
 }
 
 /**
- * Fetch all cache files from the /cache/ directory
+ * Fetch all cache files from GitHub releases
  * These files contain the pre-computed prover keys that match the deployed contracts
  */
 export async function fetchCacheFiles(): Promise<CacheFiles> {
-  console.log('[BrowserCache] Fetching cache files...');
+  console.log('[BrowserCache] Fetching cache files from GitHub releases...');
   console.log('[BrowserCache] Cache list:', cacheJSONList.files.length, 'files');
+  console.log('[BrowserCache] Base URL:', GITHUB_RELEASE_BASE_URL);
   
   const cacheListPromises = cacheJSONList.files.map(async (file: string) => {
     try {
       const [header, data] = await Promise.all([
-        fetch(`/cache/${file}.header`).then((res) => {
+        fetch(`${GITHUB_RELEASE_BASE_URL}/${file}.header`).then((res) => {
           if (!res.ok) throw new Error(`Failed to fetch ${file}.header: ${res.status}`);
           return res.text();
         }),
-        fetch(`/cache/${file}`).then((res) => {
+        fetch(`${GITHUB_RELEASE_BASE_URL}/${file}`).then((res) => {
           if (!res.ok) throw new Error(`Failed to fetch ${file}: ${res.status}`);
           return res.text();
         }),
