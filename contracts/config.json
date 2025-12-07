@@ -7,14 +7,14 @@
   },
   "contracts": {
     "didRegistry": {
-      "address": "B62qkqG87kYzP2cnLx3a8V9SEbsULCuXzaEwVenRHaRf6fK4wkSGpyM",
+      "address": "B62qkoY7NFfriUPxXYm5TWqJtz4TocpQhmzYq4LK7uXw63v8L8yZQfy",
       "network": "devnet",
-      "deployedAt": "2025-11-27T16:18:20.054Z"
+      "deployedAt": "2025-12-07T20:12:24.830Z"
     },
     "zkpVerifier": {
-      "address": "B62qkXJxwHpseGa7jSo9TqW9tcuRMT3vNUAAHSBKFmL7XKKAm3cSqPZ",
+      "address": "B62qkRuB4ojsqGmtJaH4eJQqMMdJYfGR2UNKtEUMeJzr1qd3G7rTDLG",
       "network": "devnet",
-      "deployedAt": "2025-11-27T16:18:20.055Z"
+      "deployedAt": "2025-12-07T20:12:24.833Z"
     }
   }
 }

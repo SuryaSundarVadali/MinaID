@@ -64,8 +64,8 @@ const NETWORK_CONFIG = {
   networkId: 'devnet' as const,
   minaEndpoint: 'https://api.minascan.io/node/devnet/v1/graphql',
   archiveEndpoint: 'https://api.minascan.io/archive/devnet/v1/graphql',
-  didRegistryAddress: process.env.NEXT_PUBLIC_DID_REGISTRY_DEVNET || 'B62qkqG87kYzP2cnLx3a8V9SEbsULCuXzaEwVenRHaRf6fK4wkSGpyM',
-  zkpVerifierAddress: process.env.NEXT_PUBLIC_ZKP_VERIFIER_DEVNET || 'B62qkXJxwHpseGa7jSo9TqW9tcuRMT3vNUAAHSBKFmL7XKKAm3cSqPZ',
+  didRegistryAddress: process.env.NEXT_PUBLIC_DID_REGISTRY_DEVNET || 'B62qkoY7NFfriUPxXYm5TWqJtz4TocpQhmzYq4LK7uXw63v8L8yZQfy',
+  zkpVerifierAddress: process.env.NEXT_PUBLIC_ZKP_VERIFIER_DEVNET || 'B62qkRuB4ojsqGmtJaH4eJQqMMdJYfGR2UNKtEUMeJzr1qd3G7rTDLG',
 };
 
 // Singleton instance
