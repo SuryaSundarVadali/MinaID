@@ -67,6 +67,7 @@ export function SignupOrchestrator({ onSuccess }: SignupOrchestratorProps = {}) 
 
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [minaPrivateKey, setMinaPrivateKey] = useState<PrivateKey | null>(null);
+  const [useAuroAddress, setUseAuroAddress] = useState(true); // Use Auro wallet address as DID
 
   /**
    * Step 1: Connect Wallet
@@ -77,14 +78,24 @@ export function SignupOrchestrator({ onSuccess }: SignupOrchestratorProps = {}) 
     try {
       const walletInfo = await connectAuroWallet();
       
-      setState(prev => ({ ...prev, loadingMessage: 'Generating Mina key pair...' }));
+      let did: string;
       
-      // Generate or import Mina private key
-      const privateKey = PrivateKey.random();
-      const publicKey = privateKey.toPublicKey();
-      const did = publicKey.toBase58();
-
-      setMinaPrivateKey(privateKey);
+      if (useAuroAddress && walletInfo.address) {
+        // Use Auro wallet address directly as DID
+        // This allows using Auro for signing and the account is already funded
+        did = walletInfo.address;
+        setMinaPrivateKey(null); // Will use Auro wallet for signing
+        console.log('[Signup] Using Auro wallet address as DID:', did);
+      } else {
+        // Generate a new Mina keypair (privacy mode)
+        setState(prev => ({ ...prev, loadingMessage: 'Generating Mina key pair...' }));
+        const privateKey = PrivateKey.random();
+        const publicKey = privateKey.toPublicKey();
+        did = publicKey.toBase58();
+        setMinaPrivateKey(privateKey);
+        console.log('[Signup] Generated new keypair for DID:', did);
+        console.log('[Signup] ⚠️ This address needs to be funded before registration');
+      }
       
       setState(prev => ({
         ...prev,
@@ -110,7 +121,7 @@ export function SignupOrchestrator({ onSuccess }: SignupOrchestratorProps = {}) 
     try {
       const walletInfo = await connectMetamask();
       
-      // Generate Mina key pair
+      // For Metamask, generate Mina key pair (Metamask addresses aren't Mina compatible)
       const privateKey = PrivateKey.random();
       const publicKey = privateKey.toPublicKey();
       const did = publicKey.toBase58();
@@ -298,7 +309,7 @@ export function SignupOrchestrator({ onSuccess }: SignupOrchestratorProps = {}) 
       
       // Initialize contract interface
       const networkConfig = createNetworkConfig(
-        (process.env.NEXT_PUBLIC_NETWORK as any) || 'berkeley'
+        (process.env.NEXT_PUBLIC_NETWORK as any) || 'devnet'
       );
       const contractInterface = new ContractInterface(networkConfig);
       await contractInterface.initialize();
@@ -315,20 +326,31 @@ export function SignupOrchestrator({ onSuccess }: SignupOrchestratorProps = {}) 
       const merkleMap = new LocalMerkleMap();
       const witness = merkleMap.getWitness(didKey);
 
-      // Load actual private key using Passkey authentication
-      if (!state.passkeyId) {
-        throw new Error('Passkey ID not found. Please complete Step 4 first.');
+      setState(prev => ({ ...prev, loadingMessage: 'Preparing transaction...' }));
+
+      // Determine signing method
+      let actualPrivateKey: PrivateKey | null = null;
+
+      // Check if we're using Auro wallet address (no stored private key needed)
+      if (useAuroAddress && typeof window !== 'undefined' && (window as any).mina) {
+        console.log('[Signup] Using Auro Wallet for signing - no private key needed');
+        actualPrivateKey = null; // Will trigger wallet signing
+      } else if (state.passkeyId) {
+        // Load private key using Passkey authentication
+        console.log('[Signup] Loading private key with Passkey...');
+        const privateKeyBase58 = await loadPrivateKey('auro', state.passkeyId, state.did);
+        
+        if (!privateKeyBase58) {
+          throw new Error('Failed to load private key. Please try again.');
+        }
+
+        actualPrivateKey = PrivateKey.fromBase58(privateKeyBase58);
+        console.log('[Signup] Private key loaded successfully');
+      } else {
+        throw new Error('No signing method available. Please connect Auro Wallet or complete passkey setup.');
       }
 
-      console.log('Loading private key with Passkey...');
-      const privateKeyBase58 = await loadPrivateKey('auro', state.passkeyId, state.did);
-      
-      if (!privateKeyBase58) {
-        throw new Error('Failed to load private key. Please try Step 4 again.');
-      }
-
-      const actualPrivateKey = PrivateKey.fromBase58(privateKeyBase58);
-      console.log('Private key loaded successfully');
+      setState(prev => ({ ...prev, loadingMessage: 'Registering DID on blockchain (this may take 2-3 minutes)...' }));
 
       // Register DID on-chain
       const result = await contractInterface.registerDID(
@@ -342,12 +364,15 @@ export function SignupOrchestrator({ onSuccess }: SignupOrchestratorProps = {}) 
         throw new Error(result.error || 'DID registration failed');
       }
 
+      console.log('[Signup] ✅ DID registered on-chain! TX:', result.hash);
+
       setState(prev => ({
         ...prev,
         loading: false,
         step: 'complete',
       }));
     } catch (error: any) {
+      console.error('[Signup] DID registration error:', error);
       setState(prev => ({
         ...prev,
         loading: false,

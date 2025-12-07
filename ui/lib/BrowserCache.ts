@@ -26,43 +26,112 @@ interface CacheFiles {
   [key: string]: CacheFile;
 }
 
+// In-memory cache to avoid refetching
+let memoryCache: CacheFiles | null = null;
+let cachePromise: Promise<CacheFiles> | null = null;
+
+/**
+ * Fetch a single file with retry logic and no browser caching
+ */
+async function fetchWithRetry(url: string, retries = 3): Promise<string> {
+  let lastError: Error | null = null;
+  
+  for (let i = 0; i < retries; i++) {
+    try {
+      // Use cache: 'no-store' to bypass browser HTTP cache which causes ERR_CACHE_WRITE_FAILURE
+      const response = await fetch(url, { 
+        cache: 'no-store',
+        headers: {
+          'Accept': 'text/plain, application/octet-stream',
+        }
+      });
+      
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+      }
+      
+      return await response.text();
+    } catch (error: any) {
+      lastError = error;
+      console.warn(`[BrowserCache] Fetch attempt ${i + 1}/${retries} failed for ${url}:`, error.message);
+      
+      // Wait before retry with exponential backoff
+      if (i < retries - 1) {
+        await new Promise(resolve => setTimeout(resolve, 1000 * Math.pow(2, i)));
+      }
+    }
+  }
+  
+  throw lastError || new Error(`Failed to fetch ${url} after ${retries} attempts`);
+}
+
 /**
  * Fetch all cache files via the API proxy
  * These files contain the pre-computed prover keys that match the deployed contracts
  */
 export async function fetchCacheFiles(): Promise<CacheFiles> {
-  console.log('[BrowserCache] Fetching cache files via API proxy...');
-  console.log('[BrowserCache] Cache list:', cacheJSONList.files.length, 'files');
+  // Return cached result if available
+  if (memoryCache) {
+    console.log('[BrowserCache] Using in-memory cached files');
+    return memoryCache;
+  }
   
-  const cacheListPromises = cacheJSONList.files.map(async (file: string) => {
-    try {
-      const [header, data] = await Promise.all([
-        fetch(`${CACHE_PROXY_URL}/${file}.header`).then((res) => {
-          if (!res.ok) throw new Error(`Failed to fetch ${file}.header: ${res.status}`);
-          return res.text();
-        }),
-        fetch(`${CACHE_PROXY_URL}/${file}`).then((res) => {
-          if (!res.ok) throw new Error(`Failed to fetch ${file}: ${res.status}`);
-          return res.text();
-        }),
-      ]);
-      return { file, header, data };
-    } catch (error) {
-      console.warn(`[BrowserCache] Failed to fetch cache file ${file}:`, error);
-      return null;
+  // If already fetching, wait for that promise
+  if (cachePromise) {
+    console.log('[BrowserCache] Waiting for existing fetch...');
+    return cachePromise;
+  }
+  
+  cachePromise = (async () => {
+    console.log('[BrowserCache] Fetching cache files via API proxy...');
+    console.log('[BrowserCache] Cache list:', cacheJSONList.files.length, 'files');
+    
+    const result: CacheFiles = {};
+    const batchSize = 5; // Fetch 5 files at a time to avoid overwhelming the browser
+    const files = cacheJSONList.files;
+    
+    for (let i = 0; i < files.length; i += batchSize) {
+      const batch = files.slice(i, i + batchSize);
+      console.log(`[BrowserCache] Fetching batch ${Math.floor(i / batchSize) + 1}/${Math.ceil(files.length / batchSize)}...`);
+      
+      const batchPromises = batch.map(async (file: string) => {
+        try {
+          const [header, data] = await Promise.all([
+            fetchWithRetry(`${CACHE_PROXY_URL}/${file}.header`),
+            fetchWithRetry(`${CACHE_PROXY_URL}/${file}`),
+          ]);
+          return { file, header, data };
+        } catch (error) {
+          console.warn(`[BrowserCache] Failed to fetch cache file ${file}:`, error);
+          return null;
+        }
+      });
+
+      const batchResults = await Promise.all(batchPromises);
+      
+      for (const item of batchResults) {
+        if (item) {
+          result[item.file] = item;
+        }
+      }
     }
-  });
-
-  const cacheList = await Promise.all(cacheListPromises);
+    
+    const successCount = Object.keys(result).length;
+    console.log('[BrowserCache] Successfully fetched', successCount, 'of', files.length, 'files');
+    
+    if (successCount < files.length * 0.5) {
+      console.error('[BrowserCache] ⚠️ Less than 50% of cache files loaded - compilation may fail');
+    }
+    
+    memoryCache = result;
+    return result;
+  })();
   
-  // Filter out failed fetches and build the cache object
-  const validCacheList = cacheList.filter((item): item is CacheFile => item !== null);
-  console.log('[BrowserCache] Successfully fetched', validCacheList.length, 'of', cacheJSONList.files.length, 'files');
-
-  return validCacheList.reduce((acc: CacheFiles, { file, header, data }) => {
-    acc[file] = { file, header, data };
-    return acc;
-  }, {});
+  try {
+    return await cachePromise;
+  } finally {
+    cachePromise = null;
+  }
 }
 
 /**

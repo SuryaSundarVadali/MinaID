@@ -103,7 +103,7 @@ export function CredentialsCard({
     setIsGenerating(true);
     try {
       const { generateAgeProof, generateKYCProof, generateSelectiveDisclosureProof, generateCitizenshipZKProof } = await import('../../lib/ProofGenerator');
-      const { PrivateKey } = await import('o1js');
+      const { PrivateKey, PublicKey } = await import('o1js');
       
       const walletData = localStorage.getItem('minaid_wallet_connected');
       if (!walletData) {
@@ -127,16 +127,46 @@ export function CredentialsCard({
       const salt = localStorage.getItem(`proof_salt_${userIdentifier}`) || Math.random().toString(36).substring(7);
       localStorage.setItem(`proof_salt_${userIdentifier}`, salt);
       
-      // Create deterministic private key from user identifier
-      // In production, this should be from actual wallet signing
-      const seedString = `${userIdentifier}:${salt}:minaid_proof_key`;
-      const seedBytes = new TextEncoder().encode(seedString);
-      let seedNum = BigInt(0);
-      for (let i = 0; i < Math.min(seedBytes.length, 31); i++) {
-        seedNum = (seedNum << BigInt(8)) | BigInt(seedBytes[i]);
+      let privateKey: any;
+      let publicKey: any;
+      
+      // Check if Auro wallet is available and use it for signing
+      if (typeof window !== 'undefined' && (window as any).mina) {
+        try {
+          // Request accounts from Auro wallet
+          const accounts = await (window as any).mina.requestAccounts();
+          if (accounts && accounts.length > 0) {
+            publicKey = PublicKey.fromBase58(accounts[0]);
+            
+            // Create a deterministic key derived from wallet address
+            // This ensures proofs can be verified consistently
+            const seedString = `${accounts[0]}:${salt}:minaid_proof_key`;
+            const seedBytes = new TextEncoder().encode(seedString);
+            let seedNum = BigInt(0);
+            for (let i = 0; i < Math.min(seedBytes.length, 31); i++) {
+              seedNum = (seedNum << BigInt(8)) | BigInt(seedBytes[i]);
+            }
+            privateKey = PrivateKey.fromBigInt(seedNum);
+            publicKey = privateKey.toPublicKey();
+            console.log('[ProofGen] Using Auro wallet-derived key for proof generation');
+          }
+        } catch (walletError) {
+          console.warn('[ProofGen] Auro wallet not available, falling back to deterministic key');
+        }
       }
-      const privateKey = PrivateKey.fromBigInt(seedNum);
-      const publicKey = privateKey.toPublicKey();
+      
+      // Fallback to deterministic key if wallet not available
+      if (!privateKey) {
+        const seedString = `${userIdentifier}:${salt}:minaid_proof_key`;
+        const seedBytes = new TextEncoder().encode(seedString);
+        let seedNum = BigInt(0);
+        for (let i = 0; i < Math.min(seedBytes.length, 31); i++) {
+          seedNum = (seedNum << BigInt(8)) | BigInt(seedBytes[i]);
+        }
+        privateKey = PrivateKey.fromBigInt(seedNum);
+        publicKey = privateKey.toPublicKey();
+        console.log('[ProofGen] Using deterministic key for proof generation');
+      }
       
       let proof: any = null;
       

@@ -173,12 +173,32 @@ export function VerifierDashboard() {
       let status: 'verified' | 'failed' = 'verified';
 
       try {
+        // Check if Auro Wallet is available
+        if (typeof window === 'undefined' || !(window as any).mina) {
+          throw new Error('Auro Wallet not found. Please install Auro Wallet to verify proofs on-chain.');
+        }
+
+        // Request wallet connection
+        const accounts = await (window as any).mina.requestAccounts();
+        if (!accounts || accounts.length === 0) {
+          throw new Error('Please connect your Auro Wallet to verify proofs on-chain.');
+        }
+
         const contractInterface = await getContractInterface();
-        const txResult = await contractInterface.verifyProofOnChain(proofData, 'EKEpKAJmk5UqjTVbXgWHoyWWTAx7PWbuxnd8gLh4kkNX7ESTdWFY');
+        // Pass null to use Auro Wallet for signing
+        const txResult = await contractInterface.verifyProofOnChain(proofData, null);
         if (txResult.success) txHash = txResult.hash;
-        else status = 'failed';
-      } catch {
+        else {
+          status = 'failed';
+          throw new Error(txResult.error || 'On-chain verification failed');
+        }
+      } catch (verifyError: any) {
+        console.error('Verification error:', verifyError);
         status = 'failed';
+        // Re-throw to show user the error
+        if (verifyError.message.includes('Wallet') || verifyError.message.includes('connect')) {
+          throw verifyError;
+        }
       }
 
       const credentialFailed = Object.values(credentialChecks).some((c: any) => !c.matches);

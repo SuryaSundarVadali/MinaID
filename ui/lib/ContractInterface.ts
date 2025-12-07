@@ -589,14 +589,14 @@ export class ContractInterface {
    * This creates a blockchain transaction that will appear on Mina Explorer
    * 
    * @param proofData The complete proof data from JSON file
-   * @param verifierPrivateKeyBase58 Private key of verifier in base58 format (to pay fees)
+   * @param verifierPrivateKeyBase58 Private key of verifier in base58 format (to pay fees), or null to use Auro wallet
    * @returns Transaction result with explorer URL
    */
   async verifyProofOnChain(
     proofData: any,
-    verifierPrivateKeyBase58: string
+    verifierPrivateKeyBase58: string | null = null
   ): Promise<TransactionResult> {
-    console.log('[ContractInterface] *** verifyProofOnChain v2 - UPDATED CODE ***');
+    console.log('[ContractInterface] *** verifyProofOnChain v3 - WITH WALLET SUPPORT ***');
     try {
       // Ensure contracts are compiled
       await this.ensureCompiled();
@@ -605,9 +605,29 @@ export class ContractInterface {
         await this.initialize();
       }
 
-      // Parse the private key from base58
-      const verifierPrivateKey = PrivateKey.fromBase58(verifierPrivateKeyBase58);
-      const verifier = verifierPrivateKey.toPublicKey();
+      // Get verifier address - either from private key or wallet
+      let verifier: PublicKey;
+      let verifierPrivateKey: PrivateKey | null = null;
+      let useWallet = false;
+
+      if (verifierPrivateKeyBase58) {
+        // Use provided private key
+        verifierPrivateKey = PrivateKey.fromBase58(verifierPrivateKeyBase58);
+        verifier = verifierPrivateKey.toPublicKey();
+        console.log('[ContractInterface] Using provided private key');
+      } else if (typeof window !== 'undefined' && (window as any).mina) {
+        // Use Auro Wallet
+        useWallet = true;
+        const accounts = await (window as any).mina.requestAccounts();
+        if (!accounts || accounts.length === 0) {
+          throw new Error('No wallet account found. Please connect Auro Wallet.');
+        }
+        verifier = PublicKey.fromBase58(accounts[0]);
+        console.log('[ContractInterface] Using Auro Wallet');
+      } else {
+        throw new Error('No private key provided and Auro Wallet not available');
+      }
+
       console.log('[ContractInterface] Verifying proof on-chain...');
       console.log('[ContractInterface] Verifier:', verifier.toBase58());
       console.log('[ContractInterface] Proof Type:', proofData.proofType);
@@ -780,22 +800,42 @@ export class ContractInterface {
       console.log('[ContractInterface] Proving transaction...');
       await tx.prove();
 
-      console.log('[ContractInterface] Signing transaction...');
-      await tx.sign([verifierPrivateKey]);
+      let txHash = '';
 
-      console.log('[ContractInterface] Sending transaction to blockchain...');
-      const pendingTx = await tx.send();
+      if (useWallet) {
+        // Use Auro Wallet for signing
+        console.log('[ContractInterface] Requesting wallet signature...');
+        const transactionJSON = tx.toJSON();
+        
+        try {
+          const { hash } = await (window as any).mina.sendTransaction({
+            transaction: transactionJSON
+          });
+          txHash = hash;
+          console.log('[ContractInterface] ✅ Transaction sent via wallet! Hash:', txHash);
+        } catch (walletError: any) {
+          throw new Error(`Wallet signing failed: ${walletError.message}`);
+        }
+      } else if (verifierPrivateKey) {
+        // Use provided private key
+        console.log('[ContractInterface] Signing transaction with private key...');
+        await tx.sign([verifierPrivateKey]);
 
-      const txHash = pendingTx.hash || '';
-      console.log('[ContractInterface] ✅ Transaction sent! Hash:', txHash);
-      console.log('[ContractInterface] Explorer:', getExplorerUrl(txHash, this.networkConfig.networkId));
+        console.log('[ContractInterface] Sending transaction to blockchain...');
+        const pendingTx = await tx.send();
 
-      // Wait for confirmation (optional - can be async)
-      if (pendingTx.status === 'pending') {
-        console.log('[ContractInterface] Waiting for confirmation...');
-        await pendingTx.wait();
-        console.log('[ContractInterface] ✅ Transaction confirmed!');
+        txHash = pendingTx.hash || '';
+        console.log('[ContractInterface] ✅ Transaction sent! Hash:', txHash);
+
+        // Wait for confirmation (optional - can be async)
+        if (pendingTx.status === 'pending') {
+          console.log('[ContractInterface] Waiting for confirmation...');
+          await pendingTx.wait();
+          console.log('[ContractInterface] ✅ Transaction confirmed!');
+        }
       }
+
+      console.log('[ContractInterface] Explorer:', getExplorerUrl(txHash, this.networkConfig.networkId));
 
       return {
         hash: txHash,
