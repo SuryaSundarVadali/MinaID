@@ -23,6 +23,13 @@
 
 import { Field, Poseidon, PrivateKey, PublicKey, Signature } from 'o1js';
 import { generateAgeHash, calculateAge, type AadharData } from './AadharParser';
+import { vkManager } from './VerificationKeyManager';
+
+// Proof generator version - increment when making breaking changes
+const PROOF_GENERATOR_VERSION = '2.1.0';
+
+// Cache version - should match the deployed cache
+const CACHE_VERSION = 'v1';
 
 // Helper function to convert string to hex (browser-compatible, no Buffer)
 function stringToHex(str: string): string {
@@ -72,12 +79,22 @@ export interface ProofInput {
   salt?: string;          // Random salt for commitment
 }
 
+/**
+ * Metadata for proof verification key tracking
+ */
+export interface ProofMetadata {
+  verificationKeyHash?: string;  // Hash of VK used during proof generation
+  generatorVersion?: string;     // Version of proof generator
+  cacheVersion?: string;         // Version of circuit cache used
+}
+
 export interface AgeProof {
   proof: string;          // Serialized ZK proof
   publicOutput: string;   // Public commitment
   minimumAge: number;     // Minimum age proven
   timestamp: number;      // When proof was generated
   expiresAt?: number;     // Optional expiration
+  metadata?: ProofMetadata;  // Verification metadata
 }
 
 export interface KYCProof {
@@ -86,6 +103,7 @@ export interface KYCProof {
   issuer: string;         // Issuer identifier (UIDAI)
   timestamp: number;      // When proof was generated
   attributes: string[];   // Attributes proven (e.g., ['age', 'gender'])
+  metadata?: ProofMetadata;  // Verification metadata
 }
 
 export interface CredentialProof {
@@ -95,6 +113,27 @@ export interface CredentialProof {
   issuer: string;         // Issuer public key
   timestamp: number;      // When proof was generated
   expiresAt?: number;     // Credential expiration
+  metadata?: ProofMetadata;  // Verification metadata
+}
+
+/**
+ * Create proof metadata with current verification key hashes
+ */
+function createProofMetadata(programName?: string): ProofMetadata {
+  const metadata: ProofMetadata = {
+    generatorVersion: PROOF_GENERATOR_VERSION,
+    cacheVersion: CACHE_VERSION,
+  };
+
+  // Add verification key hash if available
+  if (programName) {
+    const vkHash = vkManager.getKeyHash(programName);
+    if (vkHash) {
+      metadata.verificationKeyHash = vkHash;
+    }
+  }
+
+  return metadata;
 }
 
 /**
@@ -189,6 +228,7 @@ export async function generateAgeProof(
       minimumAge, // Store the actual requested minimumAge for reference
       timestamp: Number(publicInput.timestamp.toString()),
       expiresAt: Date.now() + (365 * 24 * 60 * 60 * 1000), // 1 year
+      metadata: createProofMetadata('AgeVerificationProgram'),
     };
 
     return proof;
@@ -251,6 +291,7 @@ export async function generateKYCProof(
       issuer: 'UIDAI',
       timestamp: Date.now(),
       attributes,
+      metadata: createProofMetadata('ZKPVerifier'),
     };
 
     return proof;
@@ -298,6 +339,7 @@ export async function generateCredentialProof(
       credentialType,
       issuer: issuerPublicKey.toBase58(),
       timestamp: Date.now(),
+      metadata: createProofMetadata('ZKPVerifier'),
     };
 
     return proof;
