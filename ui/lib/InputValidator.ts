@@ -93,8 +93,8 @@ export function validateProofData(proof: any): { valid: boolean; error?: string 
     return { valid: false, error: 'Proof must have a valid ID' };
   }
 
-  // Accept various proof types
-  const validTypes = ['age', 'kyc', 'composite', 'citizenship', 'age18', 'age21'];
+  // Accept various proof types including name verification and citizenship
+  const validTypes = ['age', 'kyc', 'composite', 'citizenship', 'age18', 'age21', 'name', 'identity'];
   if (!proofType || !validTypes.includes(proofType)) {
     return { valid: false, error: `Proof must have a valid type. Got: ${proofType}` };
   }
