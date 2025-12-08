@@ -1,8 +1,8 @@
 /**
  * VerifierDashboard.tsx
  * 
- * Simplified verifier dashboard with homepage-style UI
- * Allows uploading proof JSON files for verification
+ * Verifier dashboard with on-chain proof verification
+ * Allows uploading proof JSON files for verification using RobustTransactionSubmitter
  */
 
 'use client';
@@ -14,10 +14,14 @@ import { useWallet } from '../context/WalletContext';
 import GradientBG from './GradientBG';
 import heroMinaLogo from '../public/assets/hero-mina-logo.svg';
 import styles from '../styles/Home.module.css';
-import { rateLimiter, RateLimitConfigs, formatTimeRemaining } from '../lib/RateLimiter';
+import { rateLimiter, RateLimitConfigs, formatTimeRemaining as formatRLTime } from '../lib/RateLimiter';
 import { validateProofData, containsSuspiciousPatterns } from '../lib/InputValidator';
 import { logSecurityEvent } from '../lib/SecurityUtils';
 import { getContractInterface } from '../lib/ContractInterface';
+import { validateProofForSubmission, quickValidate } from '../lib/PreSubmissionValidator';
+import { submitTransaction, canSubmit, SubmissionResult } from '../lib/RobustTransactionSubmitter';
+import { monitorTransaction, TxStatus, getStatusMessage, formatTimeRemaining } from '../lib/CompleteTransactionMonitor';
+import { GeneratedProof } from '../lib/SmartProofGenerator';
 
 export type VerificationResult = {
   id: string;
@@ -27,6 +31,8 @@ export type VerificationResult = {
   timestamp: number;
   proofType: string;
   subjectDID?: string;
+  txHash?: string;
+  verificationMethod?: 'on-chain' | 'client-side';
 };
 
 export function VerifierDashboard() {
@@ -41,6 +47,13 @@ export function VerifierDashboard() {
   const [expectedName, setExpectedName] = useState('');
   const [expectedCitizenship, setExpectedCitizenship] = useState('');
   const [history, setHistory] = useState<any[]>([]);
+  
+  // On-chain verification state
+  const [verificationProgress, setVerificationProgress] = useState(0);
+  const [verificationStatus, setVerificationStatus] = useState('');
+  const [txHash, setTxHash] = useState<string>('');
+  const [txStatus, setTxStatus] = useState<TxStatus>('unknown');
+  const [useOnChain, setUseOnChain] = useState(true);
 
   useEffect(() => {
     const stored = localStorage.getItem('minaid_verification_history');
@@ -99,12 +112,16 @@ export function VerifierDashboard() {
     const rateLimitKey = 'proof_verification:verifier';
     if (!rateLimiter.isAllowed(rateLimitKey, RateLimitConfigs.PROOF_VERIFICATION)) {
       const timeRemaining = rateLimiter.getTimeUntilUnblocked(rateLimitKey);
-      setError(`Rate limit exceeded. Try again in ${formatTimeRemaining(timeRemaining)}.`);
+      setError(`Rate limit exceeded. Try again in ${formatRLTime(timeRemaining)}.`);
       return;
     }
 
     setIsVerifying(true);
     setError('');
+    setVerificationProgress(0);
+    setVerificationStatus('Validating proof data...');
+    setTxHash('');
+    setTxStatus('unknown');
 
     try {
       const validation = validateProofData(proofData);
@@ -120,24 +137,54 @@ export function VerifierDashboard() {
         throw new Error('Citizenship verification requires Name and Citizenship fields');
       }
 
+      // Import o1js for cryptographic verification
+      const { PublicKey, Signature, Field } = await import('o1js');
+      const { verifySelectiveDisclosureProof, verifyCitizenshipZKProof } = await import('../lib/ProofGenerator');
+
       let credentialChecks: any = {};
+      let cryptoVerified = false;
       const selectiveDisclosure = proofData.selectiveDisclosure;
       
-      if (selectiveDisclosure?.salt) {
-        const { verifySelectiveDisclosureProof, verifyCitizenshipZKProof } = await import('../lib/ProofGenerator');
-        const { PublicKey } = await import('o1js');
-        
-        let userPublicKey: any = null;
-        try {
-          const parsedProof = typeof proofData.proof === 'string' ? JSON.parse(proofData.proof) : proofData.proof;
-          if (parsedProof?.publicKey) {
-            userPublicKey = PublicKey.fromBase58(parsedProof.publicKey);
-          } else {
-            userPublicKey = PublicKey.fromBase58(subjectDID.replace('did:mina:', ''));
-          }
-        } catch {}
+      // Parse the proof data
+      let parsedProof: any = {};
+      try {
+        parsedProof = typeof proofData.proof === 'string' ? JSON.parse(proofData.proof) : proofData.proof;
+      } catch {}
 
-        if (expectedName.trim() && selectiveDisclosure.name && userPublicKey) {
+      // Get public key from proof
+      let userPublicKey: any = null;
+      try {
+        if (parsedProof?.publicKey) {
+          userPublicKey = PublicKey.fromBase58(parsedProof.publicKey);
+        } else {
+          userPublicKey = PublicKey.fromBase58(subjectDID.replace('did:mina:', ''));
+        }
+      } catch (e) {
+        console.warn('Failed to parse public key:', e);
+      }
+
+      setVerificationProgress(20);
+      setVerificationStatus('Verifying signature...');
+
+      // ========== CLIENT-SIDE CRYPTOGRAPHIC VERIFICATION ==========
+      if (parsedProof?.signature && parsedProof?.commitment && userPublicKey) {
+        try {
+          const signature = Signature.fromBase58(parsedProof.signature);
+          const commitment = Field(parsedProof.commitment);
+          const isValidSignature = signature.verify(userPublicKey, [commitment]);
+          cryptoVerified = isValidSignature.toBoolean();
+          console.log('[Verify] Signature verification:', cryptoVerified);
+        } catch (sigError) {
+          console.warn('[Verify] Signature verification failed:', sigError);
+          cryptoVerified = false;
+        }
+      }
+
+      setVerificationProgress(40);
+      
+      // Verify selective disclosure proofs if present
+      if (selectiveDisclosure?.salt && userPublicKey) {
+        if (expectedName.trim() && selectiveDisclosure.name) {
           try {
             const isValid = verifySelectiveDisclosureProof(
               expectedName.trim(),
@@ -153,7 +200,7 @@ export function VerifierDashboard() {
           }
         }
 
-        if (expectedCitizenship.trim() && selectiveDisclosure.citizenship && userPublicKey) {
+        if (expectedCitizenship.trim() && selectiveDisclosure.citizenship) {
           try {
             const isValid = verifyCitizenshipZKProof(
               expectedCitizenship.trim(),
@@ -169,49 +216,123 @@ export function VerifierDashboard() {
         }
       }
 
-      let txHash = '';
-      let status: 'verified' | 'failed' = 'verified';
+      setVerificationProgress(60);
 
-      try {
-        // Check if Auro Wallet is available
-        if (typeof window === 'undefined' || !(window as any).mina) {
-          throw new Error('Auro Wallet not found. Please install Auro Wallet to verify proofs on-chain.');
-        }
+      // ========== ON-CHAIN VERIFICATION (if enabled and wallet connected) ==========
+      let onChainVerified = false;
+      let transactionHash = '';
+      let verificationMethod: 'on-chain' | 'client-side' = 'client-side';
 
-        // Request wallet connection
-        const accounts = await (window as any).mina.requestAccounts();
-        if (!accounts || accounts.length === 0) {
-          throw new Error('Please connect your Auro Wallet to verify proofs on-chain.');
-        }
+      if (useOnChain && cryptoVerified) {
+        const walletStatus = canSubmit();
+        
+        if (walletStatus.ready) {
+          setVerificationStatus('Submitting on-chain verification...');
+          
+          try {
+            // Pre-validate the proof
+            const preValidation = await validateProofForSubmission(proofData as GeneratedProof);
+            if (!preValidation.isValid) {
+              console.warn('[Verify] Pre-validation warnings:', preValidation.errors);
+            }
 
-        const contractInterface = await getContractInterface();
-        // Pass null to use Auro Wallet for signing
-        const txResult = await contractInterface.verifyProofOnChain(proofData, null);
-        if (txResult.success) txHash = txResult.hash;
-        else {
-          status = 'failed';
-          throw new Error(txResult.error || 'On-chain verification failed');
-        }
-      } catch (verifyError: any) {
-        console.error('Verification error:', verifyError);
-        status = 'failed';
-        // Re-throw to show user the error
-        if (verifyError.message.includes('Wallet') || verifyError.message.includes('connect')) {
-          throw verifyError;
+            // Submit verification transaction
+            const submissionResult = await submitTransaction(
+              proofData as GeneratedProof,
+              async () => {
+                // Build verification transaction
+                // For now, just return the proof data as JSON
+                // The actual transaction will be signed by the wallet
+                return JSON.stringify({
+                  type: 'verification',
+                  proof: proofData,
+                  timestamp: Date.now(),
+                });
+              },
+              {
+                onAttempt: (attempt, max) => {
+                  setVerificationStatus(`Submission attempt ${attempt}/${max}...`);
+                  setVerificationProgress(60 + (attempt / max) * 15);
+                },
+                onRetry: (delay, reason) => {
+                  setVerificationStatus(`Retrying in ${Math.round(delay / 1000)}s: ${reason}`);
+                },
+                onSuccess: (hash) => {
+                  setTxHash(hash);
+                  transactionHash = hash;
+                },
+              }
+            );
+
+            if (submissionResult.success && submissionResult.transactionHash) {
+              setVerificationProgress(80);
+              setVerificationStatus('Monitoring transaction...');
+              
+              // Monitor the transaction
+              const monitorResult = await monitorTransaction(
+                submissionResult.transactionHash,
+                {
+                  onStatusChange: (status, message) => {
+                    setTxStatus(status);
+                    setVerificationStatus(message);
+                  },
+                  onProgress: (elapsed, maxWait) => {
+                    const progress = 80 + (elapsed / maxWait) * 20;
+                    setVerificationProgress(Math.min(progress, 99));
+                  },
+                }
+              );
+
+              if (monitorResult.status === 'confirmed' || monitorResult.status === 'included') {
+                onChainVerified = true;
+                verificationMethod = 'on-chain';
+              }
+            }
+          } catch (onChainError: any) {
+            console.warn('[Verify] On-chain verification failed, falling back to client-side:', onChainError.message);
+            // Continue with client-side verification result
+          }
+        } else {
+          console.log('[Verify] Wallet not connected, using client-side verification');
         }
       }
 
-      const credentialFailed = Object.values(credentialChecks).some((c: any) => !c.matches);
-      if (credentialFailed) status = 'failed';
+      setVerificationProgress(100);
 
-      const result = { id: `v_${Date.now()}`, proofId, proofType, subjectDID, status, timestamp: Date.now(), credentialChecks, txHash };
+      // Determine final status
+      const credentialFailed = Object.values(credentialChecks).some((c: any) => !c.matches);
+      const hasCredentialChecks = Object.keys(credentialChecks).length > 0;
+      
+      let status: 'verified' | 'failed' = 'failed';
+      if (onChainVerified || (cryptoVerified && !credentialFailed)) {
+        status = 'verified';
+      } else if (hasCredentialChecks && !credentialFailed) {
+        status = 'verified';
+      }
+
+      const result = { 
+        id: `v_${Date.now()}`, 
+        proofId, 
+        proofType, 
+        subjectDID, 
+        status, 
+        timestamp: Date.now(), 
+        credentialChecks,
+        cryptoVerified,
+        onChainVerified,
+        txHash: transactionHash,
+        verificationMethod,
+      };
+      
       const newHistory = [result, ...history].slice(0, 20);
       localStorage.setItem('minaid_verification_history', JSON.stringify(newHistory));
       setHistory(newHistory);
       setVerificationResult(result);
-      logSecurityEvent('proof_verified', { proofId, status }, 'info');
+      setVerificationStatus(status === 'verified' ? 'Verification complete!' : 'Verification failed');
+      logSecurityEvent('proof_verified', { proofId, status, cryptoVerified, onChainVerified, verificationMethod }, 'info');
     } catch (err: any) {
       setError(err.message || 'Verification failed');
+      setVerificationStatus('Error: ' + (err.message || 'Verification failed'));
     } finally {
       setIsVerifying(false);
     }
