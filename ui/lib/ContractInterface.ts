@@ -595,6 +595,149 @@ export class ContractInterface {
   }
 
   /**
+   * Register proof commitment on-chain using DIDRegistry
+   * This stores the proof commitment in the DID document
+   * 
+   * @param proofData The generated proof data
+   * @returns Transaction result
+   */
+  async registerProofCommitment(proofData: any): Promise<TransactionResult> {
+    console.log('[ContractInterface] *** registerProofCommitment - Register proof on blockchain ***');
+    try {
+      // Ensure contracts are compiled
+      await this.ensureCompiled();
+
+      if (!this.didRegistry) {
+        await this.initialize();
+      }
+
+      // Use Auro Wallet
+      if (typeof window === 'undefined' || !(window as any).mina) {
+        throw new Error('Auro Wallet not available. Please install and connect Auro Wallet.');
+      }
+
+      const accounts = await (window as any).mina.requestAccounts();
+      if (!accounts || accounts.length === 0) {
+        throw new Error('No wallet account found. Please connect Auro Wallet.');
+      }
+      
+      const userPublicKey = PublicKey.fromBase58(accounts[0]);
+      console.log('[ContractInterface] User wallet:', userPublicKey.toBase58());
+
+      // Parse the proof to get commitment
+      let parsedProof;
+      try {
+        parsedProof = typeof proofData.proof === 'string' 
+          ? JSON.parse(proofData.proof)
+          : proofData.proof;
+      } catch (e) {
+        parsedProof = proofData.proof;
+      }
+
+      // Create DID document hash from proof commitment
+      const commitment = Field(parsedProof.commitment || proofData.publicOutput);
+      const proofTypeField = Field.from(BigInt('0x' + Buffer.from(proofData.proofType).toString('hex').slice(0, 16)));
+      const timestamp = Field(Date.now());
+      
+      // Create a unique document hash combining commitment, proof type, and timestamp
+      const didDocumentHash = Poseidon.hash([commitment, proofTypeField, timestamp]);
+      
+      console.log('[ContractInterface] Proof commitment:', commitment.toString());
+      console.log('[ContractInterface] DID document hash:', didDocumentHash.toString());
+
+      // Create empty Merkle witness (for new registration)
+      const { MerkleMapWitness } = await import('o1js');
+      const witness = new MerkleMapWitness(
+        Array(256).fill(Field(0)),
+        Array(256).fill(false)
+      );
+
+      // Get private key for signature
+      // For Auro wallet, we need to derive a key or use wallet's signing
+      const { PrivateKey } = await import('o1js');
+      
+      // Derive a deterministic private key from user data for signing
+      const walletData = localStorage.getItem('minaid_wallet_connected');
+      if (!walletData) {
+        throw new Error('Wallet not connected. Please connect your wallet first.');
+      }
+      
+      const { did } = JSON.parse(walletData);
+      const userIdentifier = did || accounts[0];
+      
+      // Get or create signing key
+      let signingKey: InstanceType<typeof PrivateKey>;
+      const storedKey = localStorage.getItem(`signing_key_${userIdentifier}`);
+      
+      if (storedKey) {
+        signingKey = PrivateKey.fromBase58(storedKey);
+      } else {
+        // Generate new key and store
+        signingKey = PrivateKey.random();
+        localStorage.setItem(`signing_key_${userIdentifier}`, signingKey.toBase58());
+      }
+      
+      const signingPublicKey = signingKey.toPublicKey();
+      console.log('[ContractInterface] Signing key:', signingPublicKey.toBase58());
+
+      // Create signature
+      const signature = Signature.create(signingKey, [didDocumentHash]);
+
+      // Create transaction
+      console.log('[ContractInterface] Creating registration transaction...');
+      const tx = await Mina.transaction(
+        { sender: userPublicKey, fee: 100_000_000 }, // 0.1 MINA fee
+        async () => {
+          if (this.didRegistry) {
+            await this.didRegistry.registerDID(
+              signingPublicKey,
+              didDocumentHash,
+              witness,
+              signature
+            );
+          } else {
+            throw new Error('DIDRegistry contract not initialized');
+          }
+        }
+      );
+
+      console.log('[ContractInterface] Proving registration transaction...');
+      await tx.prove();
+
+      console.log('[ContractInterface] Requesting wallet signature...');
+      const transactionJSON = tx.toJSON();
+      
+      const result = await (window as any).mina.sendTransaction({
+        transaction: transactionJSON,
+        feePayer: {
+          fee: 0.1,
+          memo: `MinaID proof registration: ${proofData.proofType}`,
+        },
+      });
+
+      if (!result || !result.hash) {
+        throw new Error('Transaction rejected by wallet or failed');
+      }
+
+      console.log('[ContractInterface] ✅ Registration transaction sent:', result.hash);
+      
+      return {
+        hash: result.hash,
+        success: true,
+        explorerUrl: `https://minascan.io/devnet/tx/${result.hash}`,
+      };
+
+    } catch (error: any) {
+      console.error('[ContractInterface] ❌ Registration failed:', error);
+      return {
+        hash: '',
+        success: false,
+        error: error.message || 'Proof registration failed',
+      };
+    }
+  }
+
+  /**
    * Verify proof on-chain using ZKPVerifier contract
    * This creates a blockchain transaction that will appear on Mina Explorer
    * 

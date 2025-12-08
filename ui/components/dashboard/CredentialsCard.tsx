@@ -284,17 +284,70 @@ export function CredentialsCard({
         
         setGeneratedProof(proof);
         
-        // Step 2: Check if this proof type supports on-chain verification
-        const selectiveDisclosureProofs = ['name', 'citizenship', 'address', 'identity'];
-        if (selectiveDisclosureProofs.includes(proofType)) {
-          // Selective disclosure proofs are client-side only
-          setProofStatus(`✅ ${proofType.charAt(0).toUpperCase() + proofType.slice(1)} proof generated successfully!`);
-          alert(`Success! Your ${proofType} proof has been generated and saved.\n\nNote: ${proofType} proofs use selective disclosure and are verified client-side only. Download the proof to share it with verifiers.`);
-        } else {
-          // Age/KYC proofs can be submitted on-chain
-          setProofStatus('Proof validated! Preparing blockchain submission...');
+        // Step 2: Register proof on blockchain (for ALL proof types)
+        setProofStatus('Registering proof on blockchain...');
+        
+        try {
+          // Get contract interface
+          const contractInterface = await getContractInterface();
           
-          // Step 3: Submit transaction to blockchain
+          // Register proof commitment on-chain via DIDRegistry
+          setProofStatus('Creating registration transaction...');
+          const registrationResult = await contractInterface.registerProofCommitment(proof);
+          
+          if (registrationResult.success && registrationResult.hash) {
+            setTxHash(registrationResult.hash);
+            setTxStatus('pending');
+            setShowOnChainModal(true);
+            setProofStatus(`Proof registration submitted! Hash: ${registrationResult.hash.slice(0, 10)}...`);
+            
+            // Monitor registration transaction
+            const monitorCallbacks: MonitoringCallbacks = {
+              onStatusChange: (status, message) => {
+                setTxStatus(status);
+                setProofStatus(message);
+                console.log('[CredentialsCard] Registration monitor:', status, message);
+              },
+              onProgress: (elapsed, maxWait) => {
+                const remaining = maxWait - elapsed;
+                setProofStatus(`Waiting for registration confirmation... ${formatTimeRemaining(remaining)}`);
+              },
+              onConfirmed: () => {
+                setTxStatus('confirmed');
+                setProofStatus('✅ Proof registered on-chain!');
+              },
+              onFailed: (reason) => {
+                setTxStatus('failed');
+                setProofStatus(`❌ Registration failed: ${reason}`);
+              },
+            };
+            
+            const monitorResult = await monitorTransaction(
+              registrationResult.hash,
+              monitorCallbacks
+            );
+            
+            if (monitorResult.status === 'confirmed') {
+              alert(`Success! Your ${proofType} proof has been registered on the Mina blockchain.\n\nTransaction: ${registrationResult.hash}`);
+            } else {
+              alert(`Registration transaction pending or failed. Check transaction: ${registrationResult.hash}`);
+            }
+          } else {
+            throw new Error(registrationResult.error || 'Proof registration failed');
+          }
+        } catch (regError: any) {
+          console.error('[CredentialsCard] Registration error:', regError);
+          setProofStatus(`⚠️ Proof saved locally, but blockchain registration failed: ${regError.message}`);
+          alert(`Warning: Proof generated and saved locally, but blockchain registration failed:\n${regError.message}\n\nYou can still use the proof, but it won't be registered on-chain.`);
+        }
+        
+        // Step 3: For age/KYC proofs, also verify on-chain
+        const selectiveDisclosureProofs = ['name', 'citizenship', 'address', 'identity'];
+        if (!selectiveDisclosureProofs.includes(proofType)) {
+          // Age/KYC proofs - additionally verify on-chain
+          setProofStatus('Proof registered! Now verifying on-chain...');
+          
+          // Step 4: Submit verification transaction
           try {
             // Get contract interface
             const contractInterface = await getContractInterface();
@@ -322,9 +375,9 @@ export function CredentialsCard({
             if (result.success && result.transactionHash) {
               setTxHash(result.transactionHash);
               setTxStatus('pending');
-              setShowOnChainModal(true);
+              // Modal already shown from registration
               
-              // Step 4: Monitor transaction
+              // Step 5: Monitor verification transaction
               const monitorCallbacks: MonitoringCallbacks = {
                 onStatusChange: (status, message) => {
                   setTxStatus(status);
