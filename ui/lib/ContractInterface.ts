@@ -38,14 +38,24 @@ import { initializeBrowserCache } from './BrowserCache';
 // Re-export for use by other modules
 export { DIDRegistry, ZKPVerifier };
 
-// Default configuration for devnet
+// Default configuration for devnet - UPDATED Dec 7, 2025
+// These are the CORRECT deployed contract addresses
+// If you see different addresses in logs, update Vercel environment variables
 export const DEFAULT_CONFIG: NetworkConfig = {
   networkId: 'devnet',
   minaEndpoint: 'https://api.minascan.io/node/devnet/v1/graphql',
   archiveEndpoint: 'https://api.minascan.io/archive/devnet/v1/graphql',
+  // Deployed Dec 7, 2025 - DO NOT CHANGE without redeploying contracts
   didRegistryAddress: 'B62qkoY7NFfriUPxXYm5TWqJtz4TocpQhmzYq4LK7uXw63v8L8yZQfy',
   zkpVerifierAddress: 'B62qkRuB4ojsqGmtJaH4eJQqMMdJYfGR2UNKtEUMeJzr1qd3G7rTDLG',
 };
+
+// OLD/DEPRECATED contract addresses - DO NOT USE
+// These will cause "Invalid_proof In progress" errors
+const DEPRECATED_ADDRESSES = [
+  'B62qjuEhj9YjZyKTD75ywH7vY73DgUTC5bVxSCo3meirg8nGnV3CYjk', // Old DIDRegistry
+  'B62qrfTGCDP1KEx1PQa6mWGjV2b8wckbdcQRhi2Mu3AGfRYrjjnnfxW', // Old ZKPVerifier
+];
 
 // Types
 export interface NetworkConfig {
@@ -1014,13 +1024,29 @@ let contractInterfaceInstance: ContractInterface | null = null;
  */
 export async function getContractInterface(): Promise<ContractInterface> {
   if (!contractInterfaceInstance) {
-    // Use default config from environment or fallback to hardcoded devnet
+    // Get addresses from environment or use defaults
+    let didRegistryAddress = process.env.NEXT_PUBLIC_DID_REGISTRY_DEVNET || DEFAULT_CONFIG.didRegistryAddress;
+    let zkpVerifierAddress = process.env.NEXT_PUBLIC_ZKP_VERIFIER_DEVNET || DEFAULT_CONFIG.zkpVerifierAddress;
+    
+    // Check if env vars contain deprecated addresses and override with correct ones
+    if (DEPRECATED_ADDRESSES.includes(didRegistryAddress)) {
+      console.warn('[ContractInterface] ⚠️ DEPRECATED DIDRegistry address detected from env vars!');
+      console.warn('[ContractInterface] Using correct address:', DEFAULT_CONFIG.didRegistryAddress);
+      didRegistryAddress = DEFAULT_CONFIG.didRegistryAddress;
+    }
+    
+    if (DEPRECATED_ADDRESSES.includes(zkpVerifierAddress)) {
+      console.warn('[ContractInterface] ⚠️ DEPRECATED ZKPVerifier address detected from env vars!');
+      console.warn('[ContractInterface] Using correct address:', DEFAULT_CONFIG.zkpVerifierAddress);
+      zkpVerifierAddress = DEFAULT_CONFIG.zkpVerifierAddress;
+    }
+    
     const config: NetworkConfig = {
       networkId: 'devnet',
       minaEndpoint: 'https://api.minascan.io/node/devnet/v1/graphql',
       archiveEndpoint: 'https://api.minascan.io/archive/devnet/v1/graphql',
-      didRegistryAddress: process.env.NEXT_PUBLIC_DID_REGISTRY_DEVNET || DEFAULT_CONFIG.didRegistryAddress,
-      zkpVerifierAddress: process.env.NEXT_PUBLIC_ZKP_VERIFIER_DEVNET || DEFAULT_CONFIG.zkpVerifierAddress,
+      didRegistryAddress,
+      zkpVerifierAddress,
     };
     
     contractInterfaceInstance = new ContractInterface(config);
@@ -1028,4 +1054,23 @@ export async function getContractInterface(): Promise<ContractInterface> {
   }
   
   return contractInterfaceInstance;
+}
+
+/**
+ * Reset the contract interface singleton
+ * Useful for testing or when contract addresses change
+ */
+export function resetContractInterface(): void {
+  contractInterfaceInstance = null;
+  console.log('[ContractInterface] Singleton reset');
+}
+
+/**
+ * Get the current contract addresses being used
+ */
+export function getCurrentContractAddresses(): { didRegistry: string; zkpVerifier: string } {
+  return {
+    didRegistry: DEFAULT_CONFIG.didRegistryAddress,
+    zkpVerifier: DEFAULT_CONFIG.zkpVerifierAddress,
+  };
 }
