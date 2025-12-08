@@ -11,8 +11,9 @@ import React, { useState, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import { generateAgeProofSmart, generateKYCProofSmart, GeneratedProof, isProofGenerating } from '../../lib/SmartProofGenerator';
 import { validateProofForSubmission, quickValidate } from '../../lib/PreSubmissionValidator';
-import { submitTransaction, canSubmit } from '../../lib/RobustTransactionSubmitter';
-import { monitorTransaction, TxStatus, getStatusMessage, formatTimeRemaining } from '../../lib/CompleteTransactionMonitor';
+import { submitVerificationProof, canSubmit, SubmissionCallbacks } from '../../lib/RobustTransactionSubmitter';
+import { monitorTransaction, TxStatus, getStatusMessage, formatTimeRemaining, MonitoringCallbacks } from '../../lib/CompleteTransactionMonitor';
+import { getContractInterface } from '../../lib/ContractInterface';
 
 interface Credential {
   id: string;
@@ -268,10 +269,12 @@ export function CredentialsCard({
       }
       
       if (proof) {
-        // Validate before saving
+        // Step 1: Validate proof before submission
+        setProofStatus('Validating proof...');
         const validation = await validateProofForSubmission(proof);
         if (!validation.isValid) {
           console.warn('[CredentialsCard] Proof validation warnings:', validation.errors);
+          throw new Error(`Validation failed: ${validation.errors.join(', ')}`);
         }
         
         // Save proof to localStorage
@@ -280,7 +283,77 @@ export function CredentialsCard({
         localStorage.setItem(`proofs_${userIdentifier}`, JSON.stringify(proofs));
         
         setGeneratedProof(proof);
-        setProofStatus('Proof generated successfully!');
+        setProofStatus('Proof validated! Preparing blockchain submission...');
+        
+        // Step 2: Submit transaction to blockchain
+        try {
+          // Get contract interface
+          const contractInterface = await getContractInterface();
+          
+          // Callback handlers
+          const callbacks: SubmissionCallbacks = {
+            onAttempt: (attempt, maxAttempts) => {
+              setProofStatus(`Submitting to blockchain (attempt ${attempt}/${maxAttempts})...`);
+            },
+            onRetry: (delay, reason) => {
+              setProofStatus(`Retrying in ${(delay / 1000).toFixed(1)}s: ${reason}`);
+            },
+            onSuccess: (txHash) => {
+              setTxHash(txHash);
+              setProofStatus(`Transaction submitted! Hash: ${txHash.slice(0, 10)}...`);
+            },
+            onError: (error, errorType) => {
+              console.error('[CredentialsCard] Submission error:', error, errorType);
+            },
+          };
+          
+          setProofStatus('Submitting proof to blockchain...');
+          const result = await submitVerificationProof(proof, contractInterface, callbacks);
+          
+          if (result.success && result.transactionHash) {
+            setTxHash(result.transactionHash);
+            setTxStatus('pending');
+            setShowOnChainModal(true);
+            
+            // Step 3: Monitor transaction
+            const monitorCallbacks: MonitoringCallbacks = {
+              onStatusChange: (status, message) => {
+                setTxStatus(status);
+                setProofStatus(message);
+                console.log('[CredentialsCard] Monitor status:', status, message);
+              },
+              onProgress: (elapsed, maxWait) => {
+                const remaining = maxWait - elapsed;
+                setProofStatus(`Waiting for confirmation... ${formatTimeRemaining(remaining)}`);
+              },
+              onConfirmed: (result) => {
+                setTxStatus('confirmed');
+                setProofStatus('✅ Proof submitted and confirmed on-chain!');
+              },
+              onFailed: (reason) => {
+                setTxStatus('failed');
+                setProofStatus(`❌ Transaction failed: ${reason}`);
+              },
+            };
+            
+            const monitorResult = await monitorTransaction(
+              result.transactionHash,
+              monitorCallbacks
+            );
+            
+            if (monitorResult.status === 'confirmed') {
+              alert('Success! Your proof has been confirmed on the Mina blockchain.');
+            } else if (monitorResult.status === 'failed') {
+              alert(`Transaction failed: ${monitorResult.failureReason}`);
+            }
+          } else {
+            throw new Error(result.error || 'Transaction submission failed');
+          }
+        } catch (txError: any) {
+          console.error('[CredentialsCard] Transaction error:', txError);
+          setProofStatus(`⚠️ Blockchain submission failed: ${txError.message}`);
+          alert(`Warning: Proof generated but blockchain submission failed: ${txError.message}\nProof saved locally.`);
+        }
         
         if (onGenerateProof) {
           onGenerateProof(selectedCredential, proofType);
@@ -611,6 +684,86 @@ export function CredentialsCard({
               >
                 Close
               </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Transaction Status Modal */}
+      {showOnChainModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50">
+          <div className="bg-white rounded-xl p-6 max-w-md w-full mx-4 shadow-2xl">
+            <div className="flex justify-between items-center mb-4">
+              <h3 className="text-xl font-bold text-gray-900">Blockchain Transaction</h3>
+              <button 
+                onClick={() => setShowOnChainModal(false)}
+                className="text-gray-400 hover:text-gray-600"
+              >
+                ✕
+              </button>
+            </div>
+
+            <div className="space-y-4">
+              {/* Status Indicator */}
+              <div className="flex items-center justify-center py-4">
+                {txStatus === 'pending' && (
+                  <div className="flex flex-col items-center gap-3">
+                    <div className="animate-spin rounded-full h-16 w-16 border-b-2 border-indigo-600"></div>
+                    <p className="text-gray-600">Processing transaction...</p>
+                  </div>
+                )}
+                {txStatus === 'confirmed' && (
+                  <div className="flex flex-col items-center gap-3">
+                    <div className="text-6xl">✅</div>
+                    <p className="text-green-600 font-semibold">Transaction Confirmed!</p>
+                  </div>
+                )}
+                {txStatus === 'failed' && (
+                  <div className="flex flex-col items-center gap-3">
+                    <div className="text-6xl">❌</div>
+                    <p className="text-red-600 font-semibold">Transaction Failed</p>
+                  </div>
+                )}
+              </div>
+
+              {/* Transaction Hash */}
+              {txHash && (
+                <div className="bg-gray-50 rounded-lg p-4">
+                  <p className="text-xs text-gray-500 uppercase tracking-wide mb-2">Transaction Hash</p>
+                  <p className="font-mono text-xs break-all text-gray-900">{txHash}</p>
+                  <a
+                    href={`https://minascan.io/devnet/tx/${txHash}`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-indigo-600 hover:text-indigo-700 text-sm mt-2 inline-block"
+                  >
+                    View on Minascan →
+                  </a>
+                </div>
+              )}
+
+              {/* Status Message */}
+              <div className="bg-blue-50 rounded-lg p-4">
+                <p className="text-sm text-gray-700">{proofStatus}</p>
+              </div>
+
+              {/* Action Buttons */}
+              <div className="flex gap-3">
+                {txStatus === 'confirmed' && generatedProof && (
+                  <button
+                    onClick={downloadProof}
+                    className="flex-1 px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors font-medium"
+                  >
+                    Download Proof
+                  </button>
+                )}
+                <button
+                  onClick={() => setShowOnChainModal(false)}
+                  className="flex-1 px-4 py-2 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 transition-colors font-medium"
+                >
+                  Close
+                </button>
+              </div>
             </div>
           </div>
         </div>
