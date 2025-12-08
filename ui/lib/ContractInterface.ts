@@ -232,38 +232,64 @@ export class ContractInterface {
         if (typeof window !== 'undefined' && (window as any).mina) {
           console.log('Using Auro Wallet for signing...');
           
-          // Build transaction using registerDIDSimple (wallet-friendly method)
-          // This method uses sender.getAndRequireSignature() internally
-          // so Auro Wallet will automatically handle the signature authorization
+          // Step 1: Request signature from wallet FIRST
+          console.log('Requesting signature from wallet...');
+          const signResult = await (window as any).mina.signFields({
+            message: [documentHash.toString()]
+          });
+          
+          console.log('Wallet sign result:', JSON.stringify(signResult));
+
+          // Step 2: Parse the signature
+          let signature: Signature;
+          if (signResult?.signature && typeof signResult.signature === 'object' && 'field' in signResult.signature && 'scalar' in signResult.signature) {
+            signature = Signature.fromObject({
+              r: Field(signResult.signature.field),
+              s: Scalar.from(signResult.signature.scalar)
+            });
+          } else if (typeof signResult?.signature === 'string') {
+            try {
+              signature = Signature.fromBase58(signResult.signature);
+            } catch (e) {
+              throw new Error(`Failed to parse signature string: ${signResult.signature}`);
+            }
+          } else {
+            throw new Error(`Invalid signature response from wallet: ${JSON.stringify(signResult)}`);
+          }
+
+          // Step 3: Build transaction with the REAL signature
+          console.log('Building transaction with wallet signature...');
           const tx = await Mina.transaction(
             { sender: did, fee: 100_000_000 }, 
             async () => {
               if (this.didRegistry) {
-                // Use registerDIDSimple instead of registerDID
-                // This method doesn't require a separate signature parameter
-                await this.didRegistry.registerDIDSimple(documentHash, merkleWitness);
+                await this.didRegistry.registerDID(did, documentHash, merkleWitness, signature);
               } else {
                 throw new Error('DIDRegistry contract not initialized');
               }
             }
           );
 
-          // DO NOT prove the transaction when using Auro Wallet
-          // The wallet will prove it automatically
-          console.log('Sending transaction to Auro Wallet for proving and signing...');
-          console.log('Note: The wallet will prove the transaction (this may take 2-3 minutes)');
+          // Step 4: Prove the transaction client-side
+          console.log('Proving transaction...');
+          console.log('This will take 2-3 minutes. Please wait...');
+          await tx.prove();
+          console.log('✅ Transaction proved successfully');
 
-          // Get the transaction JSON WITHOUT proving
-          const transactionJSON = tx.toJSON();
+          // Step 5: Send the proved transaction directly
+          // The transaction already has the signature embedded from Step 2
+          console.log('Sending transaction to network...');
+          const pendingTx = await tx.send();
+          
+          const hash = pendingTx.hash || '';
+          console.log('Transaction sent! Hash:', hash);
 
-          // Send to wallet - the wallet will prove and sign the transaction
-          const { hash } = await (window as any).mina.sendTransaction({
-            transaction: transactionJSON,
-            feePayer: {
-              fee: 0.1, // Fee in MINA
-              memo: 'MinaID: DID Registration'
-            }
-          });
+          // Wait for confirmation
+          if (pendingTx.status === 'pending') {
+            console.log('Waiting for transaction confirmation...');
+            await pendingTx.wait();
+            console.log('✅ Transaction confirmed!');
+          }
 
           return {
             hash,
