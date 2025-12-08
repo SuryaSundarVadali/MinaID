@@ -232,42 +232,16 @@ export class ContractInterface {
         if (typeof window !== 'undefined' && (window as any).mina) {
           console.log('Using Auro Wallet for signing...');
           
-          // 1. Sign fields
-          console.log('Requesting signature from wallet...');
-          const signResult = await (window as any).mina.signFields({
-            message: [documentHash.toString()]
-          });
-          
-          console.log('Wallet sign result:', JSON.stringify(signResult));
-
-          let signature: Signature;
-
-          // Handle different signature formats returned by wallet
-          if (signResult?.signature && typeof signResult.signature === 'object' && 'field' in signResult.signature && 'scalar' in signResult.signature) {
-            // Standard object format: { field: string, scalar: string }
-            signature = Signature.fromObject({
-              r: Field(signResult.signature.field),
-              s: Scalar.from(signResult.signature.scalar)
-            });
-          } else if (typeof signResult?.signature === 'string') {
-            // String format (Base58)
-            try {
-              signature = Signature.fromBase58(signResult.signature);
-            } catch (e) {
-              throw new Error(`Failed to parse signature string: ${signResult.signature}`);
-            }
-          } else {
-            throw new Error(`Invalid signature response from wallet: ${JSON.stringify(signResult)}`);
-          }
-
-          // 2. Build transaction
-
-          // 2. Build transaction
+          // Build transaction using registerDIDSimple (wallet-friendly method)
+          // This method uses sender.getAndRequireSignature() internally
+          // so Auro Wallet will automatically handle the signature authorization
           const tx = await Mina.transaction(
             { sender: did, fee: 100_000_000 }, 
             async () => {
               if (this.didRegistry) {
-                await this.didRegistry.registerDID(did, documentHash, merkleWitness, signature);
+                // Use registerDIDSimple instead of registerDID
+                // This method doesn't require a separate signature parameter
+                await this.didRegistry.registerDIDSimple(documentHash, merkleWitness);
               } else {
                 throw new Error('DIDRegistry contract not initialized');
               }
