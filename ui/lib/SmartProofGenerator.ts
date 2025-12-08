@@ -21,6 +21,7 @@ export interface GeneratedProof {
   did: string;
   timestamp: number;
   metadata: {
+    proofId?: string;
     verificationKeyHash: string;
     proofHash: string;
     clientVersion: string;

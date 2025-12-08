@@ -83,6 +83,7 @@ export interface ProofInput {
  * Metadata for proof verification key tracking
  */
 export interface ProofMetadata {
+  proofId?: string;              // Unique proof identifier
   verificationKeyHash?: string;  // Hash of VK used during proof generation
   generatorVersion?: string;     // Version of proof generator
   cacheVersion?: string;         // Version of circuit cache used

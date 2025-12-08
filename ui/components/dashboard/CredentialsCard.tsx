@@ -235,6 +235,7 @@ export function CredentialsCard({
           
           if (proofType === 'name') {
             const nameProof = generateSelectiveDisclosureProof(parsedAadhar.name, 'name', privateKey, salt);
+            const proofId = `proof_name_${Date.now()}`;
             proof = {
               proof: JSON.stringify({ commitment: nameProof.commitment, signature: nameProof.signature, publicKey: publicKey.toBase58() }),
               publicInput: { subjectPublicKey: publicKey.toBase58(), minimumAge: '0', ageHash: nameProof.commitment, issuerPublicKey: publicKey.toBase58(), timestamp: Math.floor(Date.now() / 1000) },
@@ -242,11 +243,12 @@ export function CredentialsCard({
               proofType: 'name',
               did: `did:mina:${publicKey.toBase58()}`,
               timestamp: Date.now(),
-              metadata: { verificationKeyHash: 'client-side-v2', proofHash: nameProof.commitment.slice(0, 16), clientVersion: '2.0.0', generationTime: 100, generatedAt: new Date().toISOString() },
+              metadata: { proofId, verificationKeyHash: 'client-side-v2', proofHash: nameProof.commitment.slice(0, 16), clientVersion: '2.0.0', generationTime: 100, generatedAt: new Date().toISOString() },
               selectiveDisclosure: { salt, name: nameProof },
             };
           } else {
             const citizenshipProof = generateCitizenshipZKProof(parsedAadhar.country || 'India', privateKey, salt);
+            const proofId = `proof_citizenship_${Date.now()}`;
             proof = {
               proof: JSON.stringify({ commitment: citizenshipProof.commitment, signature: citizenshipProof.signature, publicKey: publicKey.toBase58() }),
               publicInput: { subjectPublicKey: publicKey.toBase58(), minimumAge: '0', ageHash: citizenshipProof.commitment, issuerPublicKey: publicKey.toBase58(), timestamp: Math.floor(Date.now() / 1000) },
@@ -254,7 +256,7 @@ export function CredentialsCard({
               proofType: 'citizenship',
               did: `did:mina:${publicKey.toBase58()}`,
               timestamp: Date.now(),
-              metadata: { verificationKeyHash: 'client-side-v2', proofHash: citizenshipProof.commitment.slice(0, 16), clientVersion: '2.0.0', generationTime: 100, generatedAt: new Date().toISOString() },
+              metadata: { proofId, verificationKeyHash: 'client-side-v2', proofHash: citizenshipProof.commitment.slice(0, 16), clientVersion: '2.0.0', generationTime: 100, generatedAt: new Date().toISOString() },
               selectiveDisclosure: { salt, citizenship: citizenshipProof },
             };
           }
