@@ -143,6 +143,49 @@ export class DIDRegistry extends SmartContract {
   }
 
   /**
+   * Register a new DID (simplified version for wallet integration)
+   * This version uses the transaction sender as both the DID owner and signer
+   * 
+   * @param didDocumentHash - Hash of the DID document (off-chain data)
+   * @param witness - Merkle witness proving the current state of the map
+   */
+  @method
+  async registerDIDSimple(
+    didDocumentHash: Field,
+    witness: MerkleMapWitness
+  ) {
+    // Get current Merkle Map root from on-chain state
+    const currentRoot = this.didMapRoot.getAndRequireEquals();
+
+    // Get the transaction sender and require their signature
+    const sender = this.sender.getAndRequireSignature();
+
+    // Generate key from sender's public key for Merkle Map
+    const key = Poseidon.hash(sender.toFields());
+
+    // Verify the witness is valid for current root with value 0 (empty slot)
+    // This proves that the key doesn't currently have a value in the map
+    const [witnessRoot, witnessKey] = witness.computeRootAndKey(Field(0));
+    currentRoot.assertEquals(witnessRoot, 'Invalid Merkle witness or DID already registered');
+    key.assertEquals(witnessKey, 'Key mismatch in witness');
+
+    // Update the Merkle Map with the new DID
+    const [newRoot] = witness.computeRootAndKey(didDocumentHash);
+    this.didMapRoot.set(newRoot);
+
+    // Increment total DIDs counter
+    const currentTotal = this.totalDIDs.getAndRequireEquals();
+    this.totalDIDs.set(currentTotal.add(1));
+
+    // Emit event for indexers
+    this.emitEvent('DIDRegistered', new DIDRegisteredEvent({
+      publicKeyX: sender.x,
+      didHash: didDocumentHash,
+      timestamp: this.network.blockchainLength.getAndRequireEquals().value,
+    }));
+  }
+
+  /**
    * Revoke an existing DID
    * 
    * @param userPublicKey - The public key of the DID to revoke

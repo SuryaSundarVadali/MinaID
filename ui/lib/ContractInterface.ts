@@ -45,14 +45,16 @@ export const DEFAULT_CONFIG: NetworkConfig = {
   networkId: 'devnet',
   minaEndpoint: 'https://api.minascan.io/node/devnet/v1/graphql',
   archiveEndpoint: 'https://api.minascan.io/archive/devnet/v1/graphql',
-  // Deployed Dec 7, 2025 - DO NOT CHANGE without redeploying contracts
-  didRegistryAddress: 'B62qkoY7NFfriUPxXYm5TWqJtz4TocpQhmzYq4LK7uXw63v8L8yZQfy',
-  zkpVerifierAddress: 'B62qkRuB4ojsqGmtJaH4eJQqMMdJYfGR2UNKtEUMeJzr1qd3G7rTDLG',
+  // Deployed Dec 8, 2025 - DO NOT CHANGE without redeploying contracts
+  didRegistryAddress: 'B62qqfXbZPJAH3RBqbpKeQfUzWKw7JehiyHDhWCFZB8NLctRxoVPrTD',
+  zkpVerifierAddress: 'B62qjrwq6t1GbMnS9RqTzr3jJpqAR59jSp2YJnmpmjoGH1BqGRPccjw',
 };
 
 // OLD/DEPRECATED contract addresses - DO NOT USE
 // These will cause "Invalid_proof In progress" errors
 const DEPRECATED_ADDRESSES = [
+  'B62qkoY7NFfriUPxXYm5TWqJtz4TocpQhmzYq4LK7uXw63v8L8yZQfy', // Old DIDRegistry Dec 7
+  'B62qkRuB4ojsqGmtJaH4eJQqMMdJYfGR2UNKtEUMeJzr1qd3G7rTDLG', // Old ZKPVerifier Dec 7
   'B62qjuEhj9YjZyKTD75ywH7vY73DgUTC5bVxSCo3meirg8nGnV3CYjk', // Old DIDRegistry
   'B62qrfTGCDP1KEx1PQa6mWGjV2b8wckbdcQRhi2Mu3AGfRYrjjnnfxW', // Old ZKPVerifier
 ];
@@ -604,6 +606,17 @@ export class ContractInterface {
   async registerProofCommitment(proofData: any): Promise<TransactionResult> {
     console.log('[ContractInterface] *** registerProofCommitment - Register proof on blockchain ***');
     try {
+      // Validate input
+      if (!proofData) {
+        throw new Error('Proof data is required');
+      }
+      if (!proofData.proof && !proofData.publicOutput) {
+        throw new Error('Proof must contain either proof or publicOutput field');
+      }
+      if (!proofData.proofType) {
+        throw new Error('Proof type is required');
+      }
+
       // Ensure contracts are compiled
       await this.ensureCompiled();
 
@@ -635,97 +648,91 @@ export class ContractInterface {
       }
 
       // Create DID document hash from proof commitment
-      const commitment = Field(parsedProof.commitment || proofData.publicOutput);
-      const proofTypeField = Field.from(BigInt('0x' + Buffer.from(proofData.proofType).toString('hex').slice(0, 16)));
-      const timestamp = Field(Date.now());
-      
-      // Create a unique document hash combining commitment, proof type, and timestamp
-      const didDocumentHash = Poseidon.hash([commitment, proofTypeField, timestamp]);
-      
-      console.log('[ContractInterface] Proof commitment:', commitment.toString());
+      let commitment: Field;
+      try {
+        const commitmentValue = parsedProof.commitment || proofData.publicOutput;
+        if (!commitmentValue) {
+          throw new Error('No commitment or publicOutput found in proof');
+        }
+        commitment = Field(commitmentValue);
+        console.log('[ContractInterface] Proof commitment:', commitment.toString());
+      } catch (e: any) {
+        throw new Error(`Failed to parse commitment: ${e.message}`);
+      }
+      // Use commitment directly as the DID document hash
+      const didDocumentHash = commitment;
       console.log('[ContractInterface] DID document hash:', didDocumentHash.toString());
 
-      // For registration, we need to get the current Merkle root from the contract
-      // and create a proper witness. For now, we'll use a simplified approach:
-      // Just use the commitment directly as the DID document hash
-      const simplifiedDocHash = commitment; // Use commitment directly
-      
-      console.log('[ContractInterface] Using simplified doc hash:', simplifiedDocHash.toString());
-
       // Import required classes
-      const { PrivateKey, MerkleMap } = await import('o1js');
+      const { MerkleMap } = await import('o1js');
       
       // Create an empty MerkleMap to generate a valid witness
-      const emptyMap = new MerkleMap();
-      
-      // Get the witness for this registration
-      // The key is derived from the user's public key
-      const keyHash = Poseidon.hash(userPublicKey.toFields());
-      const witness = emptyMap.getWitness(keyHash);
-      
-      console.log('[ContractInterface] Created valid Merkle witness');
-
-      // Derive a deterministic private key from user data for signing
-      const walletData = localStorage.getItem('minaid_wallet_connected');
-      if (!walletData) {
-        throw new Error('Wallet not connected. Please connect your wallet first.');
+      let witness;
+      try {
+        const emptyMap = new MerkleMap();
+        
+        // Get the witness for this registration
+        // The key is derived from the user's public key
+        const keyHash = Poseidon.hash(userPublicKey.toFields());
+        witness = emptyMap.getWitness(keyHash);
+        
+        console.log('[ContractInterface] Created valid Merkle witness');
+      } catch (e: any) {
+        throw new Error(`Failed to create Merkle witness: ${e.message}`);
       }
-      
-      const { did } = JSON.parse(walletData);
-      const userIdentifier = did || accounts[0];
-      
-      // Get or create signing key
-      let signingKey: InstanceType<typeof PrivateKey>;
-      const storedKey = localStorage.getItem(`signing_key_${userIdentifier}`);
-      
-      if (storedKey) {
-        signingKey = PrivateKey.fromBase58(storedKey);
-      } else {
-        // Generate new key and store
-        signingKey = PrivateKey.random();
-        localStorage.setItem(`signing_key_${userIdentifier}`, signingKey.toBase58());
-      }
-      
-      const signingPublicKey = signingKey.toPublicKey();
-      console.log('[ContractInterface] Signing key:', signingPublicKey.toBase58());
 
-      // Create signature for the simplified document hash
-      const signature = Signature.create(signingKey, [simplifiedDocHash]);
-
-      // Create transaction
+      // Create transaction using the simplified registration method
+      // This method uses this.sender.getAndRequireSignature() internally
       console.log('[ContractInterface] Creating registration transaction...');
-      const tx = await Mina.transaction(
-        { sender: userPublicKey, fee: 100_000_000 }, // 0.1 MINA fee
-        async () => {
-          if (this.didRegistry) {
-            await this.didRegistry.registerDID(
-              signingPublicKey,
-              didDocumentHash,
-              witness,
-              signature
-            );
-          } else {
-            throw new Error('DIDRegistry contract not initialized');
+      let tx;
+      try {
+        tx = await Mina.transaction(
+          { sender: userPublicKey, fee: 100_000_000 }, // 0.1 MINA fee
+          async () => {
+            if (this.didRegistry) {
+              // Use the simplified registration method that doesn't require a separate signature
+              await this.didRegistry.registerDIDSimple(
+                didDocumentHash,    // DID document hash (using commitment)
+                witness              // Merkle witness for empty slot
+              );
+            } else {
+              throw new Error('DIDRegistry contract not initialized');
+            }
           }
-        }
-      );
+        );
+      } catch (e: any) {
+        throw new Error(`Failed to create transaction: ${e.message}`);
+      }
 
       console.log('[ContractInterface] Proving registration transaction...');
-      await tx.prove();
+      try {
+        await tx.prove();
+        console.log('[ContractInterface] Transaction proof generated successfully');
+      } catch (e: any) {
+        throw new Error(`Failed to prove transaction: ${e.message}. This may indicate a contract logic error.`);
+      }
 
       console.log('[ContractInterface] Requesting wallet signature...');
-      const transactionJSON = tx.toJSON();
-      
-      const result = await (window as any).mina.sendTransaction({
-        transaction: transactionJSON,
-        feePayer: {
-          fee: 0.1,
-          memo: `MinaID proof registration: ${proofData.proofType}`,
-        },
-      });
+      let result;
+      try {
+        const transactionJSON = tx.toJSON();
+        
+        result = await (window as any).mina.sendTransaction({
+          transaction: transactionJSON,
+          feePayer: {
+            fee: 0.1,
+            memo: `MinaID: Register ${proofData.proofType} proof`,
+          },
+        });
 
-      if (!result || !result.hash) {
-        throw new Error('Transaction rejected by wallet or failed');
+        if (!result || !result.hash) {
+          throw new Error('Transaction rejected by wallet or failed to return transaction hash');
+        }
+      } catch (e: any) {
+        if (e.message.includes('User rejected')) {
+          throw new Error('Transaction rejected by user');
+        }
+        throw new Error(`Wallet transaction failed: ${e.message}`);
       }
 
       console.log('[ContractInterface] ✅ Registration transaction sent:', result.hash);

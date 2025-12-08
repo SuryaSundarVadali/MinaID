@@ -1,0 +1,67 @@
+
+> contracts@0.1.0 deploy
+> npm run build && node build/scripts/deploy.js
+
+
+> contracts@0.1.0 build
+> tsc
+
+╔═══════════════════════════════════════════╗
+║   MinaID Contract Deployment Script      ║
+║   Network: Berkeley Testnet              ║
+╚═══════════════════════════════════════════╝
+
+✅ Connected to Devnet
+✅ Loaded deployer key from config
+🔑 Deployer address: B62qqWYLoCqdYTbBBEYBfyabrkWtAiNamjCsf3en5QiHE7d4irz2UN5
+
+📊 Checking deployer balance...
+⚠️  Could not check balance. Proceeding with deployment...
+
+🚀 Deploying DIDRegistry contract...
+   Contract address: B62qqfXbZPJAH3RBqbpKeQfUzWKw7JehiyHDhWCFZB8NLctRxoVPrTD
+   Compiling contract...
+   ✅ Compilation complete
+   Creating deployment transaction...
+   Proving transaction...
+   Signing transaction...
+   Sending transaction...
+   Transaction hash: 5Ju3wkfbHYqPrLy9htqXTs3V5aP6RyA1eZgFGBWh7yENqWBvxgtd
+   Waiting for confirmation...
+✅ DIDRegistry deployed successfully!
+   Address: B62qqfXbZPJAH3RBqbpKeQfUzWKw7JehiyHDhWCFZB8NLctRxoVPrTD
+
+🚀 Deploying ZKPVerifier contract...
+   Contract address: B62qjrwq6t1GbMnS9RqTzr3jJpqAR59jSp2YJnmpmjoGH1BqGRPccjw
+   Compiling contract...
+   ✅ Compilation complete
+   Creating deployment transaction...
+   Proving transaction...
+   Signing transaction...
+   Sending transaction...
+   Transaction hash: 5Ju9uUjmgVRtyztje4SbTgAkzWCTtbgGzqbCby9DLF99M5c2APUs
+   Waiting for confirmation...
+✅ ZKPVerifier deployed successfully!
+   Address: B62qjrwq6t1GbMnS9RqTzr3jJpqAR59jSp2YJnmpmjoGH1BqGRPccjw
+
+📝 Updating config.json...
+✅ Config updated
+
+📝 Updating ui/.env.local...
+✅ UI environment updated
+
+╔═══════════════════════════════════════════╗
+║   ✅ DEPLOYMENT SUCCESSFUL!               ║
+╚═══════════════════════════════════════════╝
+
+📝 Deployed Contracts:
+   DIDRegistry:  B62qqfXbZPJAH3RBqbpKeQfUzWKw7JehiyHDhWCFZB8NLctRxoVPrTD
+   ZKPVerifier:  B62qjrwq6t1GbMnS9RqTzr3jJpqAR59jSp2YJnmpmjoGH1BqGRPccjw
+
+🌐 Network:      devnet
+🔗 Explorer:     https://minascan.io/devnet/account/B62qqfXbZPJAH3RBqbpKeQfUzWKw7JehiyHDhWCFZB8NLctRxoVPrTD
+
+💡 Next Steps:
+   1. Verify contracts on Minascan (Devnet)
+   2. Test signup flow in UI
+   3. Generate and verify proofs
