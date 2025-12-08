@@ -644,6 +644,11 @@ export class ContractInterface {
 
       const proofType = proofData.proofType;
       
+      // Check if proof type is supported for on-chain verification
+      if (proofType === 'citizenship' || proofType === 'name' || proofType === 'address' || proofType === 'identity') {
+        throw new Error(`${proofType} proofs use selective disclosure and cannot be verified on-chain. They are verified client-side only. Please use age18, age21, or kyc proof types for on-chain verification.`);
+      }
+      
       // Parse the proof data (it's a JSON string)
       let parsedProof;
       try {

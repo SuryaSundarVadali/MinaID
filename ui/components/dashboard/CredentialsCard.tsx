@@ -283,76 +283,86 @@ export function CredentialsCard({
         localStorage.setItem(`proofs_${userIdentifier}`, JSON.stringify(proofs));
         
         setGeneratedProof(proof);
-        setProofStatus('Proof validated! Preparing blockchain submission...');
         
-        // Step 2: Submit transaction to blockchain
-        try {
-          // Get contract interface
-          const contractInterface = await getContractInterface();
+        // Step 2: Check if this proof type supports on-chain verification
+        const selectiveDisclosureProofs = ['name', 'citizenship', 'address', 'identity'];
+        if (selectiveDisclosureProofs.includes(proofType)) {
+          // Selective disclosure proofs are client-side only
+          setProofStatus(`✅ ${proofType.charAt(0).toUpperCase() + proofType.slice(1)} proof generated successfully!`);
+          alert(`Success! Your ${proofType} proof has been generated and saved.\n\nNote: ${proofType} proofs use selective disclosure and are verified client-side only. Download the proof to share it with verifiers.`);
+        } else {
+          // Age/KYC proofs can be submitted on-chain
+          setProofStatus('Proof validated! Preparing blockchain submission...');
           
-          // Callback handlers
-          const callbacks: SubmissionCallbacks = {
-            onAttempt: (attempt, maxAttempts) => {
-              setProofStatus(`Submitting to blockchain (attempt ${attempt}/${maxAttempts})...`);
-            },
-            onRetry: (delay, reason) => {
-              setProofStatus(`Retrying in ${(delay / 1000).toFixed(1)}s: ${reason}`);
-            },
-            onSuccess: (txHash) => {
-              setTxHash(txHash);
-              setProofStatus(`Transaction submitted! Hash: ${txHash.slice(0, 10)}...`);
-            },
-            onError: (error, errorType) => {
-              console.error('[CredentialsCard] Submission error:', error, errorType);
-            },
-          };
-          
-          setProofStatus('Submitting proof to blockchain...');
-          const result = await submitVerificationProof(proof, contractInterface, callbacks);
-          
-          if (result.success && result.transactionHash) {
-            setTxHash(result.transactionHash);
-            setTxStatus('pending');
-            setShowOnChainModal(true);
+          // Step 3: Submit transaction to blockchain
+          try {
+            // Get contract interface
+            const contractInterface = await getContractInterface();
             
-            // Step 3: Monitor transaction
-            const monitorCallbacks: MonitoringCallbacks = {
-              onStatusChange: (status, message) => {
-                setTxStatus(status);
-                setProofStatus(message);
-                console.log('[CredentialsCard] Monitor status:', status, message);
+            // Callback handlers
+            const callbacks: SubmissionCallbacks = {
+              onAttempt: (attempt, maxAttempts) => {
+                setProofStatus(`Submitting to blockchain (attempt ${attempt}/${maxAttempts})...`);
               },
-              onProgress: (elapsed, maxWait) => {
-                const remaining = maxWait - elapsed;
-                setProofStatus(`Waiting for confirmation... ${formatTimeRemaining(remaining)}`);
+              onRetry: (delay, reason) => {
+                setProofStatus(`Retrying in ${(delay / 1000).toFixed(1)}s: ${reason}`);
               },
-              onConfirmed: (result) => {
-                setTxStatus('confirmed');
-                setProofStatus('✅ Proof submitted and confirmed on-chain!');
+              onSuccess: (txHash) => {
+                setTxHash(txHash);
+                setProofStatus(`Transaction submitted! Hash: ${txHash.slice(0, 10)}...`);
               },
-              onFailed: (reason) => {
-                setTxStatus('failed');
-                setProofStatus(`❌ Transaction failed: ${reason}`);
+              onError: (error, errorType) => {
+                console.error('[CredentialsCard] Submission error:', error, errorType);
               },
             };
             
-            const monitorResult = await monitorTransaction(
-              result.transactionHash,
-              monitorCallbacks
-            );
+            setProofStatus('Submitting proof to blockchain...');
+            const result = await submitVerificationProof(proof, contractInterface, callbacks);
             
-            if (monitorResult.status === 'confirmed') {
-              alert('Success! Your proof has been confirmed on the Mina blockchain.');
-            } else if (monitorResult.status === 'failed') {
-              alert(`Transaction failed: ${monitorResult.failureReason}`);
+            if (result.success && result.transactionHash) {
+              setTxHash(result.transactionHash);
+              setTxStatus('pending');
+              setShowOnChainModal(true);
+              
+              // Step 4: Monitor transaction
+              const monitorCallbacks: MonitoringCallbacks = {
+                onStatusChange: (status, message) => {
+                  setTxStatus(status);
+                  setProofStatus(message);
+                  console.log('[CredentialsCard] Monitor status:', status, message);
+                },
+                onProgress: (elapsed, maxWait) => {
+                  const remaining = maxWait - elapsed;
+                  setProofStatus(`Waiting for confirmation... ${formatTimeRemaining(remaining)}`);
+                },
+                onConfirmed: (result) => {
+                  setTxStatus('confirmed');
+                  setProofStatus('✅ Proof submitted and confirmed on-chain!');
+                },
+                onFailed: (reason) => {
+                  setTxStatus('failed');
+                  setProofStatus(`❌ Transaction failed: ${reason}`);
+                },
+              };
+              
+              const monitorResult = await monitorTransaction(
+                result.transactionHash,
+                monitorCallbacks
+              );
+              
+              if (monitorResult.status === 'confirmed') {
+                alert('Success! Your proof has been confirmed on the Mina blockchain.');
+              } else if (monitorResult.status === 'failed') {
+                alert(`Transaction failed: ${monitorResult.failureReason}`);
+              }
+            } else {
+              throw new Error(result.error || 'Transaction submission failed');
             }
-          } else {
-            throw new Error(result.error || 'Transaction submission failed');
+          } catch (txError: any) {
+            console.error('[CredentialsCard] Transaction error:', txError);
+            setProofStatus(`⚠️ Blockchain submission failed: ${txError.message}`);
+            alert(`Warning: Proof generated but blockchain submission failed: ${txError.message}\nProof saved locally.`);
           }
-        } catch (txError: any) {
-          console.error('[CredentialsCard] Transaction error:', txError);
-          setProofStatus(`⚠️ Blockchain submission failed: ${txError.message}`);
-          alert(`Warning: Proof generated but blockchain submission failed: ${txError.message}\nProof saved locally.`);
         }
         
         if (onGenerateProof) {
