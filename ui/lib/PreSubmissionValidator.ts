@@ -41,7 +41,11 @@ function validateProofStructure(proof: GeneratedProof): string[] {
   if (proof.publicInput) {
     if (!proof.publicInput.subjectPublicKey) errors.push('Missing subject public key');
     if (!proof.publicInput.timestamp) errors.push('Missing timestamp');
-    if (!proof.publicInput.ageHash) errors.push('Missing age hash');
+    // ageHash is only required for age and KYC proofs, not for selective disclosure proofs
+    const requiresAgeHash = ['age18', 'age21', 'kyc', 'age13', 'age16', 'age25', 'age65'].includes(proof.proofType) || proof.proofType.startsWith('age');
+    if (requiresAgeHash && !proof.publicInput.ageHash) {
+      errors.push('Missing age hash');
+    }
   }
   
   // Validate metadata
@@ -51,7 +55,7 @@ function validateProofStructure(proof: GeneratedProof): string[] {
   }
   
   // Validate proof type
-  const validTypes = ['age18', 'age21', 'kyc', 'age13', 'age16', 'age25', 'age65'];
+  const validTypes = ['age18', 'age21', 'kyc', 'age13', 'age16', 'age25', 'age65', 'name', 'citizenship', 'address', 'identity'];
   if (proof.proofType && !validTypes.includes(proof.proofType) && !proof.proofType.startsWith('age')) {
     errors.push(`Invalid proof type: ${proof.proofType}`);
   }
