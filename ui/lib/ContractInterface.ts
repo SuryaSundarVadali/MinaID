@@ -274,19 +274,21 @@ export class ContractInterface {
             }
           );
 
-          console.log('Proving transaction (this may take 2-3 minutes)...');
-          const startProve = Date.now();
-          await tx.prove();
-          const proveTime = ((Date.now() - startProve) / 1000).toFixed(1);
-          console.log(`Transaction proved successfully in ${proveTime}s`);
+          // DO NOT prove the transaction when using Auro Wallet
+          // The wallet will prove it automatically
+          console.log('Sending transaction to Auro Wallet for proving and signing...');
+          console.log('Note: The wallet will prove the transaction (this may take 2-3 minutes)');
 
-          // Get the transaction JSON AFTER proving - this includes the proof
+          // Get the transaction JSON WITHOUT proving
           const transactionJSON = tx.toJSON();
-          console.log('Transaction JSON obtained, sending to wallet...');
 
-          // Send to wallet - the transactionJSON should be the complete proved transaction
+          // Send to wallet - the wallet will prove and sign the transaction
           const { hash } = await (window as any).mina.sendTransaction({
-            transaction: transactionJSON
+            transaction: transactionJSON,
+            feePayer: {
+              fee: 0.1, // Fee in MINA
+              memo: 'MinaID: DID Registration'
+            }
           });
 
           return {
@@ -704,15 +706,10 @@ export class ContractInterface {
         throw new Error(`Failed to create transaction: ${e.message}`);
       }
 
-      console.log('[ContractInterface] Proving registration transaction...');
-      try {
-        await tx.prove();
-        console.log('[ContractInterface] Transaction proof generated successfully');
-      } catch (e: any) {
-        throw new Error(`Failed to prove transaction: ${e.message}. This may indicate a contract logic error.`);
-      }
+      // DO NOT prove when using Auro Wallet - the wallet will prove it automatically
+      console.log('[ContractInterface] Sending transaction to Auro Wallet for proving and signing...');
+      console.log('[ContractInterface] Note: The wallet will prove the transaction (may take 2-3 minutes)');
 
-      console.log('[ContractInterface] Requesting wallet signature...');
       let result;
       try {
         const transactionJSON = tx.toJSON();
@@ -971,19 +968,22 @@ export class ContractInterface {
         }
       );
 
-      console.log('[ContractInterface] Proving transaction...');
-      await tx.prove();
-
       let txHash = '';
 
       if (useWallet) {
-        // Use Auro Wallet for signing
-        console.log('[ContractInterface] Requesting wallet signature...');
+        // DO NOT prove when using Auro Wallet - the wallet will prove it automatically
+        console.log('[ContractInterface] Sending transaction to Auro Wallet for proving and signing...');
+        console.log('[ContractInterface] Note: The wallet will prove the transaction (may take 2-3 minutes)');
+        
         const transactionJSON = tx.toJSON();
         
         try {
           const { hash } = await (window as any).mina.sendTransaction({
-            transaction: transactionJSON
+            transaction: transactionJSON,
+            feePayer: {
+              fee: 0.1,
+              memo: 'MinaID: Verify Proof'
+            }
           });
           txHash = hash;
           console.log('[ContractInterface] ✅ Transaction sent via wallet! Hash:', txHash);
@@ -991,6 +991,10 @@ export class ContractInterface {
           throw new Error(`Wallet signing failed: ${walletError.message}`);
         }
       } else if (verifierPrivateKey) {
+        // Prove transaction when NOT using wallet
+        console.log('[ContractInterface] Proving transaction...');
+        await tx.prove();
+        
         // Use provided private key
         console.log('[ContractInterface] Signing transaction with private key...');
         await tx.sign([verifierPrivateKey]);
