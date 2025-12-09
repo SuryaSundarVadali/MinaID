@@ -16,7 +16,7 @@ const state = {
   transaction: null as null | Transaction,
   cache: null as null | Cache,
   cacheLoader: getCacheLoader((progress) => {
-    console.log(`[Cache] Loading ${progress.file}: ${progress.percentage.toFixed(1)}%`);
+    console.log(`[Cache] Loading ${progress.fileId}: ${progress.percentage.toFixed(1)}%`);
   }),
 };
 

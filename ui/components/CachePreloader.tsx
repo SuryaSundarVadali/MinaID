@@ -33,15 +33,10 @@ export default function CachePreloader() {
           <div className="bg-blue-50 dark:bg-blue-900/20 p-4 rounded-lg">
             <p className="text-sm text-gray-600 dark:text-gray-400">Files</p>
             <p className="text-2xl font-bold text-blue-600 dark:text-blue-400">
-              {stats.totalFiles}
+              {stats.fileCount}
             </p>
           </div>
-          <div className="bg-green-50 dark:bg-green-900/20 p-4 rounded-lg">
-            <p className="text-sm text-gray-600 dark:text-gray-400">Chunks</p>
-            <p className="text-2xl font-bold text-green-600 dark:text-green-400">
-              {stats.totalChunks}
-            </p>
-          </div>
+
           <div className="bg-purple-50 dark:bg-purple-900/20 p-4 rounded-lg">
             <p className="text-sm text-gray-600 dark:text-gray-400">Size</p>
             <p className="text-2xl font-bold text-purple-600 dark:text-purple-400">
@@ -56,7 +51,7 @@ export default function CachePreloader() {
         <div className="mb-6">
           <div className="flex justify-between items-center mb-2">
             <span className="text-sm font-medium text-gray-700 dark:text-gray-300">
-              Loading {progress.file}
+              Loading {progress.fileId}
             </span>
             <span className="text-sm font-medium text-gray-700 dark:text-gray-300">
               {progress.percentage.toFixed(1)}%
@@ -124,7 +119,7 @@ export default function CachePreloader() {
           {isPreloading ? 'Preloading...' : 'Preload All Cache Files'}
         </button>
 
-        {stats && stats.totalFiles > 0 && (
+        {stats && stats.fileCount > 0 && (
           <button
             onClick={clearCache}
             disabled={isPreloading}

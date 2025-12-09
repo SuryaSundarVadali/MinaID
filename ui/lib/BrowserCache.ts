@@ -84,25 +84,25 @@ export async function fetchCacheFiles(): Promise<CacheFiles> {
   
   cachePromise = (async () => {
     console.log('[BrowserCache] Fetching cache files via API proxy...');
-    console.log('[BrowserCache] Cache list:', cacheJSONList.files.length, 'files');
+    const fileIds = Object.keys(cacheJSONList.files);
+    console.log('[BrowserCache] Cache list:', fileIds.length, 'files');
     
     const result: CacheFiles = {};
     const batchSize = 5; // Fetch 5 files at a time to avoid overwhelming the browser
-    const files = cacheJSONList.files;
     
-    for (let i = 0; i < files.length; i += batchSize) {
-      const batch = files.slice(i, i + batchSize);
-      console.log(`[BrowserCache] Fetching batch ${Math.floor(i / batchSize) + 1}/${Math.ceil(files.length / batchSize)}...`);
+    for (let i = 0; i < fileIds.length; i += batchSize) {
+      const batch = fileIds.slice(i, i + batchSize);
+      console.log(`[BrowserCache] Fetching batch ${Math.floor(i / batchSize) + 1}/${Math.ceil(fileIds.length / batchSize)}...`);
       
-      const batchPromises = batch.map(async (file: string) => {
+      const batchPromises = batch.map(async (fileId: string) => {
         try {
           const [header, data] = await Promise.all([
-            fetchWithRetry(`${CACHE_PROXY_URL}/${file}.header`),
-            fetchWithRetry(`${CACHE_PROXY_URL}/${file}`),
+            fetchWithRetry(`${CACHE_PROXY_URL}/${fileId}.header`),
+            fetchWithRetry(`${CACHE_PROXY_URL}/${fileId}`),
           ]);
-          return { file, header, data };
+          return { file: fileId, header, data }; // Keep 'file' property for backward compat
         } catch (error) {
-          console.warn(`[BrowserCache] Failed to fetch cache file ${file}:`, error);
+          console.warn(`[BrowserCache] Failed to fetch cache file ${fileId}:`, error);
           return null;
         }
       });
@@ -117,9 +117,9 @@ export async function fetchCacheFiles(): Promise<CacheFiles> {
     }
     
     const successCount = Object.keys(result).length;
-    console.log('[BrowserCache] Successfully fetched', successCount, 'of', files.length, 'files');
+    console.log('[BrowserCache] Successfully fetched', successCount, 'of', fileIds.length, 'files');
     
-    if (successCount < files.length * 0.5) {
+    if (successCount < fileIds.length * 0.5) {
       console.error('[BrowserCache] ⚠️ Less than 50% of cache files loaded - compilation may fail');
     }
     

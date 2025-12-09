@@ -5,12 +5,9 @@
  */
 
 import { useState, useEffect, useCallback } from 'react';
-import { getCacheLoader, LoadProgress } from '@/lib/CacheLoader';
+import { getCacheLoader, LoadProgress, type CacheStats as MerkleCacheStats } from '@/lib/CacheLoader';
 
-export interface CacheStats {
-  totalFiles: number;
-  totalChunks: number;
-  totalSize: number;
+export interface CacheStats extends MerkleCacheStats {
   formattedSize: string;
 }
 
@@ -59,10 +56,10 @@ export function useCachePreloader() {
         ...prev,
         isPreloading: false,
         isComplete: true,
-        stats: {
+        stats: stats ? {
           ...stats,
           formattedSize: formatBytes(stats.totalSize)
-        }
+        } : null
       }));
     } catch (error) {
       console.error('[CachePreloader] Error:', error);
@@ -95,10 +92,10 @@ export function useCachePreloader() {
         ...prev,
         isPreloading: false,
         isComplete: true,
-        stats: {
+        stats: stats ? {
           ...stats,
           formattedSize: formatBytes(stats.totalSize)
-        }
+        } : null
       }));
     } catch (error) {
       console.error('[CachePreloader] Error:', error);
@@ -139,11 +136,11 @@ export function useCachePreloader() {
         const stats = await cacheLoader.getStats();
         setState(prev => ({
           ...prev,
-          stats: {
+          stats: stats ? {
             ...stats,
             formattedSize: formatBytes(stats.totalSize)
-          },
-          isComplete: stats.totalFiles > 0
+          } : null,
+          isComplete: stats ? stats.fileCount > 0 : false
         }));
       } catch (error) {
         console.error('[CachePreloader] Error loading stats:', error);
