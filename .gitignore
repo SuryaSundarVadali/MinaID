@@ -6,6 +6,11 @@ ui/public/cache/srs-*
 ui/public/cache/lagrange-*
 # Keep cache.json for file list
 !ui/public/cache.json
+# Allow registerDIDSimple cache files (needed for Auro Wallet integration)
+!ui/public/cache/step-pk-didregistry-registerdidsimple
+!ui/public/cache/step-pk-didregistry-registerdidsimple.header
+!ui/public/cache/step-vk-didregistry-registerdidsimple
+!ui/public/cache/step-vk-didregistry-registerdidsimple.header
 .vercel
 server/public/cache/
 server/node_modules/
