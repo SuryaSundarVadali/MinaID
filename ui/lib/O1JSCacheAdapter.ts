@@ -104,6 +104,7 @@ export class O1JSCacheAdapter implements Cache {
 
 /**
  * Hybrid approach: Use MerkleCache to fetch files, then create in-memory BrowserCache
+ * Downloads missing files from /api/cache if not in IndexedDB
  */
 export async function createO1JSCacheFromMerkle(merkleCache: MerkleCache): Promise<Cache> {
   const manifest = merkleCache.getManifest();
@@ -116,16 +117,43 @@ export async function createO1JSCacheFromMerkle(merkleCache: MerkleCache): Promi
   // Load all files into memory (o1js needs sync access)
   const files: Record<string, { file: string; header: string; data: string }> = {};
   const fileIds = Object.keys(manifest.files);
+  const baseFileIds = fileIds.filter(id => !id.endsWith('.header'));
 
   let loaded = 0;
-  for (const fileId of fileIds) {
-    // Skip .header files, we'll load them with their base files
-    if (fileId.endsWith('.header')) continue;
+  let downloaded = 0;
 
-    const [dataFile, headerFile] = await Promise.all([
-      merkleCache.getFile(fileId),
-      merkleCache.getFile(`${fileId}.header`),
-    ]);
+  for (const fileId of baseFileIds) {
+    // Try to get from MerkleCache (IndexedDB)
+    let dataFile = await merkleCache.getFile(fileId);
+    let headerFile = await merkleCache.getFile(`${fileId}.header`);
+
+    // If not in cache, download from API
+    if (!dataFile || !headerFile) {
+      console.log(`[O1JSCacheFromMerkle] Downloading ${fileId} from server...`);
+      
+      try {
+        const [dataResponse, headerResponse] = await Promise.all([
+          fetch(`/api/cache/${fileId}`),
+          fetch(`/api/cache/${fileId}.header`),
+        ]);
+
+        if (dataResponse.ok && headerResponse.ok) {
+          const dataArrayBuffer = await dataResponse.arrayBuffer();
+          const headerArrayBuffer = await headerResponse.arrayBuffer();
+          
+          dataFile = new Uint8Array(dataArrayBuffer);
+          headerFile = new Uint8Array(headerArrayBuffer);
+
+          // Store in MerkleCache for future use
+          await merkleCache.storeFile(fileId, dataFile);
+          await merkleCache.storeFile(`${fileId}.header`, headerFile);
+          downloaded++;
+        }
+      } catch (error) {
+        console.error(`[O1JSCacheFromMerkle] Failed to download ${fileId}:`, error);
+        continue;
+      }
+    }
 
     if (dataFile && headerFile) {
       // Convert Uint8Array to string for BrowserCache compatibility
@@ -140,12 +168,12 @@ export async function createO1JSCacheFromMerkle(merkleCache: MerkleCache): Promi
       loaded++;
 
       if (loaded % 5 === 0) {
-        console.log(`[O1JSCacheFromMerkle] Loaded ${loaded}/${fileIds.length / 2} files...`);
+        console.log(`[O1JSCacheFromMerkle] Loaded ${loaded}/${baseFileIds.length} files...`);
       }
     }
   }
 
-  console.log(`[O1JSCacheFromMerkle] ✅ Loaded ${loaded} files into memory`);
+  console.log(`[O1JSCacheFromMerkle] ✅ Loaded ${loaded} files (${downloaded} downloaded)`);
 
   // Create o1js-compatible Cache object
   return {
