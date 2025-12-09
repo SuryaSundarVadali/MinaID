@@ -246,6 +246,54 @@ export class MerkleCache {
   }
 
   /**
+   * Store file without Merkle verification (for .header files and other metadata)
+   * Use this for files that aren't in the manifest
+   */
+  async storeFileRaw(fileId: string, data: Uint8Array): Promise<void> {
+    // Enforce storage limits
+    await this.enforceStorageLimit();
+
+    // Split into chunks
+    const chunks: { data: Uint8Array; hash: string }[] = [];
+    for (let offset = 0; offset < data.length; offset += this.CHUNK_SIZE) {
+      const end = Math.min(offset + this.CHUNK_SIZE, data.length);
+      const chunkData = data.slice(offset, end);
+      const hash = await sha256Hex(chunkData.buffer);
+      chunks.push({ data: chunkData, hash });
+    }
+
+    const chunkHashes = chunks.map(c => c.hash);
+    const fileMerkleRoot = await merkleRootFromHex(chunkHashes);
+
+    // Store chunks
+    for (let i = 0; i < chunks.length; i++) {
+      const buffer = chunks[i].data.buffer as ArrayBuffer;
+      await storeChunk({
+        fileId,
+        chunkIndex: i,
+        data: buffer,
+        hash: chunks[i].hash,
+        size: chunks[i].data.length,
+        timestamp: Date.now(),
+      });
+    }
+
+    // Store metadata
+    await storeMeta({
+      fileId,
+      totalChunks: chunks.length,
+      fileSize: data.length,
+      fileMerkleRoot,
+      chunkHashes,
+      ready: true,
+      createdAt: Date.now(),
+      lastAccessed: Date.now(),
+    });
+
+    console.log(`✅ Stored raw ${fileId}: ${chunks.length} chunks, ${(data.length / 1e6).toFixed(2)} MB`);
+  }
+
+  /**
    * Enforce storage limits with LRU eviction
    */
   private async enforceStorageLimit(): Promise<void> {

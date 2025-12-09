@@ -117,60 +117,74 @@ export async function createO1JSCacheFromMerkle(merkleCache: MerkleCache): Promi
   // Load all files into memory (o1js needs sync access)
   const files: Record<string, { file: string; header: string; data: string }> = {};
   const fileIds = Object.keys(manifest.files);
-  const baseFileIds = fileIds.filter(id => !id.endsWith('.header'));
+  const baseFileIds = fileIds.filter((id: string) => !id.endsWith('.header'));
 
   let loaded = 0;
   let downloaded = 0;
+  const batchSize = 5; // Download 5 files at a time
 
-  for (const fileId of baseFileIds) {
-    // Try to get from MerkleCache (IndexedDB)
-    let dataFile = await merkleCache.getFile(fileId);
-    let headerFile = await merkleCache.getFile(`${fileId}.header`);
+  // Process in batches to avoid overwhelming the browser
+  for (let batchStart = 0; batchStart < baseFileIds.length; batchStart += batchSize) {
+    const batchEnd = Math.min(batchStart + batchSize, baseFileIds.length);
+    const batch = baseFileIds.slice(batchStart, batchEnd);
+    
+    console.log(`[O1JSCacheFromMerkle] Processing batch ${Math.floor(batchStart / batchSize) + 1}/${Math.ceil(baseFileIds.length / batchSize)}...`);
 
-    // If not in cache, download from API
-    if (!dataFile || !headerFile) {
-      console.log(`[O1JSCacheFromMerkle] Downloading ${fileId} from server...`);
-      
-      try {
-        const [dataResponse, headerResponse] = await Promise.all([
-          fetch(`/api/cache/${fileId}`),
-          fetch(`/api/cache/${fileId}.header`),
-        ]);
+    await Promise.all(batch.map(async (fileId: string) => {
+      // Try to get from MerkleCache (IndexedDB)
+      let dataFile = await merkleCache.getFile(fileId);
+      let headerFile = await merkleCache.getFile(`${fileId}.header`);
 
-        if (dataResponse.ok && headerResponse.ok) {
-          const dataArrayBuffer = await dataResponse.arrayBuffer();
-          const headerArrayBuffer = await headerResponse.arrayBuffer();
-          
-          dataFile = new Uint8Array(dataArrayBuffer);
-          headerFile = new Uint8Array(headerArrayBuffer);
+      // If not in cache, download from API
+      if (!dataFile || !headerFile) {
+        console.log(`[O1JSCacheFromMerkle] Downloading ${fileId}...`);
+        
+        try {
+          const [dataResponse, headerResponse] = await Promise.all([
+            fetch(`/api/cache/${fileId}`),
+            fetch(`/api/cache/${fileId}.header`),
+          ]);
 
-          // Store in MerkleCache for future use
-          await merkleCache.storeFile(fileId, dataFile);
-          await merkleCache.storeFile(`${fileId}.header`, headerFile);
-          downloaded++;
+          if (dataResponse.ok && headerResponse.ok) {
+            const dataArrayBuffer = await dataResponse.arrayBuffer();
+            const headerArrayBuffer = await headerResponse.arrayBuffer();
+            
+            dataFile = new Uint8Array(dataArrayBuffer);
+            headerFile = new Uint8Array(headerArrayBuffer);
+
+            // Store in MerkleCache for future use
+            try {
+              await merkleCache.storeFile(fileId, dataFile);
+              await merkleCache.storeFileRaw(`${fileId}.header`, headerFile);
+              console.log(`[O1JSCacheFromMerkle] ✅ Cached ${fileId}`);
+              downloaded++;
+            } catch (storeError) {
+              console.warn(`[O1JSCacheFromMerkle] Failed to cache ${fileId}:`, storeError);
+            }
+          } else {
+            console.error(`[O1JSCacheFromMerkle] HTTP error for ${fileId}: ${dataResponse.status}/${headerResponse.status}`);
+          }
+        } catch (error) {
+          console.error(`[O1JSCacheFromMerkle] Failed to download ${fileId}:`, error);
+          return; // Skip this file
         }
-      } catch (error) {
-        console.error(`[O1JSCacheFromMerkle] Failed to download ${fileId}:`, error);
-        continue;
       }
-    }
 
-    if (dataFile && headerFile) {
-      // Convert Uint8Array to string for BrowserCache compatibility
-      const dataStr = new TextDecoder().decode(dataFile);
-      const headerStr = new TextDecoder().decode(headerFile).trim();
+      if (dataFile && headerFile) {
+        // Convert Uint8Array to string for BrowserCache compatibility
+        const dataStr = new TextDecoder().decode(dataFile);
+        const headerStr = new TextDecoder().decode(headerFile).trim();
 
-      files[fileId] = {
-        file: fileId,
-        header: headerStr,
-        data: dataStr,
-      };
-      loaded++;
-
-      if (loaded % 5 === 0) {
-        console.log(`[O1JSCacheFromMerkle] Loaded ${loaded}/${baseFileIds.length} files...`);
+        files[fileId] = {
+          file: fileId,
+          header: headerStr,
+          data: dataStr,
+        };
+        loaded++;
       }
-    }
+    }));
+
+    console.log(`[O1JSCacheFromMerkle] Progress: ${loaded}/${baseFileIds.length} files loaded`);
   }
 
   console.log(`[O1JSCacheFromMerkle] ✅ Loaded ${loaded} files (${downloaded} downloaded)`);
