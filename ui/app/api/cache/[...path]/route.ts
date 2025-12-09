@@ -31,7 +31,8 @@ export async function GET(
     if (ext === '.json') contentType = 'application/json';
     if (ext === '.header') contentType = 'application/octet-stream';
     
-    return new NextResponse(data, {
+    // Convert Buffer to Uint8Array for NextResponse
+    return new NextResponse(new Uint8Array(data), {
       status: 200,
       headers: {
         'Content-Type': contentType,
