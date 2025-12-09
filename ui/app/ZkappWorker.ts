@@ -1,8 +1,9 @@
-import { Mina, PublicKey, fetchAccount, Field, Poseidon } from 'o1js';
+import { Mina, PublicKey, fetchAccount, Field, Poseidon, Cache } from 'o1js';
 import * as Comlink from "comlink";
 import { DIDRegistry } from '../lib/contracts/DIDRegistry';
 import { ZKPVerifier } from '../lib/contracts/ZKPVerifier';
 import { AgeVerificationProgram } from '../lib/contracts/AgeVerificationProgram';
+import { getCacheLoader } from '../lib/CacheLoader';
 
 type Transaction = Awaited<ReturnType<typeof Mina.transaction>>;
 
@@ -14,6 +15,9 @@ const state = {
   zkpVerifierContract: null as null | ZKPVerifier,
   transaction: null as null | Transaction,
   cache: null as null | Cache,
+  cacheLoader: getCacheLoader((progress) => {
+    console.log(`[Cache] Loading ${progress.file}: ${progress.percentage.toFixed(1)}%`);
+  }),
 };
 
 export const api = {
@@ -50,15 +54,34 @@ export const api = {
   },
 
   async compileDIDRegistry() {
-    console.log("Compiling DIDRegistry from scratch (2-3 min)...");
-    const result = await state.DIDRegistryInstance.compile();
-    console.log("DIDRegistry compiled, vk:", result.verificationKey.hash.toString().slice(0, 10) + '...');
+    console.log("Compiling DIDRegistry...");
+    
+    // Preload critical cache files for registerDIDSimple method
+    console.log("[Cache] Preloading cache for registerDIDSimple...");
+    await state.cacheLoader.preloadForMethod('didregistry', 'registerdidsimple');
+    
+    // Create o1js Cache that uses Merkle-cached files
+    const cache = Cache.FileSystemDefault;
+    state.cache = cache;
+    
+    console.log("Compiling DIDRegistry with cached files...");
+    const result = await state.DIDRegistryInstance.compile({ cache });
+    console.log("✅ DIDRegistry compiled, vk:", result.verificationKey.hash.toString().slice(0, 10) + '...');
   },
 
   async compileZKPVerifier() {
-    console.log("Compiling ZKPVerifier from scratch...");
-    const result = await state.ZKPVerifierInstance.compile();
-    console.log("ZKPVerifier compiled, vk:", result.verificationKey.hash.toString().slice(0, 10) + '...');
+    console.log("Compiling ZKPVerifier...");
+    
+    // Preload cache for verifyAgeProof method
+    console.log("[Cache] Preloading cache for verifyAgeProof...");
+    await state.cacheLoader.preloadForMethod('zkpverifier', 'verifyageproof');
+    
+    const cache = Cache.FileSystemDefault;
+    state.cache = cache;
+    
+    console.log("Compiling ZKPVerifier with cached files...");
+    const result = await state.ZKPVerifierInstance.compile({ cache });
+    console.log("✅ ZKPVerifier compiled, vk:", result.verificationKey.hash.toString().slice(0, 10) + '...');
   },
 
   async fetchAccount(publicKey58: string) {
