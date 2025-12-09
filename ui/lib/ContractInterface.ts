@@ -34,6 +34,8 @@ import { ZKPVerifier } from './contracts/ZKPVerifier';
 
 // Import browser cache utilities
 import { initializeBrowserCache } from './BrowserCache';
+import { MerkleCache } from './MerkleCache';
+import { createO1JSCacheFromMerkle } from './O1JSCacheAdapter';
 
 // Re-export for use by other modules
 export { DIDRegistry, ZKPVerifier };
@@ -154,14 +156,17 @@ export class ContractInterface {
     }
     if (this.isCompiled) return;
     
-    console.log('[ContractInterface] Loading prover key cache from /cache/...');
+    console.log('[ContractInterface] Loading prover keys from IndexedDB Merkle cache...');
     console.log('[ContractInterface] This ensures verification keys match deployed contracts');
     console.time('Contract Compilation');
     
     try {
-      // Initialize browser cache - this fetches pre-computed prover keys from /cache/
-      // These keys MUST match the keys used when deploying the contracts
-      const cache = await initializeBrowserCache();
+      // Initialize MerkleCache and load all files into memory for o1js
+      const merkleCache = new MerkleCache();
+      await merkleCache.initialize();
+      
+      console.log('[ContractInterface] Creating o1js Cache from MerkleCache...');
+      const cache = await createO1JSCacheFromMerkle(merkleCache);
       console.log('[ContractInterface] Cache loaded, compiling contracts...');
       
       console.log('[ContractInterface] Compiling DIDRegistry with cache...');
