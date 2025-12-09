@@ -1,16 +1,10 @@
 # Cache files (large binary files for ZK proofs)
-ui/public/cache/*.header
-ui/public/cache/step-*
-ui/public/cache/wrap-*
-ui/public/cache/srs-*
-ui/public/cache/lagrange-*
-# Keep cache.json for file list
-!ui/public/cache.json
-# Allow registerDIDSimple cache files (needed for Auro Wallet integration)
-!ui/public/cache/step-pk-didregistry-registerdidsimple
-!ui/public/cache/step-pk-didregistry-registerdidsimple.header
-!ui/public/cache/step-vk-didregistry-registerdidsimple
-!ui/public/cache/step-vk-didregistry-registerdidsimple.header
+# These are generated during build and NOT committed to git
+# They are served from public/cache/ via API route during runtime
+ui/public/cache/*
+# Keep directory structure and documentation
+!ui/public/cache/.gitkeep
+!ui/public/cache/README.md
 .vercel
 server/public/cache/
 server/node_modules/

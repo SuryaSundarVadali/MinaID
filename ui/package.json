@@ -5,6 +5,8 @@
   "scripts": {
     "dev": "next dev",
     "build": "next build --no-lint",
+    "build:contracts": "cd ../contracts && npm run build",
+    "build:all": "npm run build:contracts && npm run build",
     "start": "next start",
     "lint": "next lint",
     "test": "vitest",

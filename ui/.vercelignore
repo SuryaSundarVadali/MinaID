@@ -1,18 +1,5 @@
-# Ignore large cache files
-public/cache/*.header
-public/cache/step-*
-public/cache/wrap-*
-public/cache/srs-*
-public/cache/lagrange-*
-
-# Keep cache.json
-!public/cache.json
-
-# Allow registerDIDSimple cache files (needed for Auro Wallet integration)
-!public/cache/step-pk-didregistry-registerdidsimple
-!public/cache/step-pk-didregistry-registerdidsimple.header
-!public/cache/step-vk-didregistry-registerdidsimple
-!public/cache/step-vk-didregistry-registerdidsimple.header
+# Don't ignore cache files - we need them deployed!
+# They're served via /api/cache/ route from public/cache/
 
 # Node modules are handled automatically
 node_modules/

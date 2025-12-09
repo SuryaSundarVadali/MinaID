@@ -1,58 +1,52 @@
 /**
- * API route to proxy GitHub release cache files with CORS support
+ * API route to serve ZK circuit cache files from /public/cache
  * 
- * This proxies requests from the browser to GitHub releases,
- * adding the necessary CORS headers to allow cross-origin requests.
+ * This serves cache files from the local public directory,
+ * allowing BrowserCache to fetch from /api/cache/<filename>
  */
 
 import { NextRequest, NextResponse } from 'next/server';
-
-const GITHUB_RELEASE_BASE_URL = 'https://github.com/SuryaSundarVadali/MinaID/releases/download/cache-v1';
+import { promises as fs } from 'fs';
+import path from 'path';
 
 export async function GET(
   request: NextRequest,
   { params }: { params: { path: string[] } }
 ) {
-  const path = params.path.join('/');
-  const githubUrl = `${GITHUB_RELEASE_BASE_URL}/${path}`;
-  
-  console.log(`[Cache Proxy] Fetching: ${githubUrl}`);
-  
   try {
-    const response = await fetch(githubUrl, {
-      headers: {
-        'User-Agent': 'MinaID-Cache-Proxy/1.0',
-      },
-    });
+    const relativePath = params.path.join('/');
     
-    if (!response.ok) {
-      console.error(`[Cache Proxy] GitHub returned ${response.status} for ${path}`);
-      return new NextResponse(`Failed to fetch ${path}`, { 
-        status: response.status,
-        headers: {
-          'Access-Control-Allow-Origin': '*',
-        },
-      });
-    }
+    // In production the Next.js app's CWD is the ui/ directory,
+    // so public/ is at <cwd>/public.
+    const filePath = path.join(process.cwd(), 'public', 'cache', relativePath);
     
-    const data = await response.arrayBuffer();
+    console.log(`[Cache API] Serving: ${relativePath}`);
+    
+    const data = await fs.readFile(filePath);
     
     // Determine content type
-    const isHeader = path.endsWith('.header');
-    const contentType = isHeader ? 'text/plain' : 'application/octet-stream';
+    const ext = path.extname(filePath);
+    let contentType = 'application/octet-stream';
+    
+    if (ext === '.json') contentType = 'application/json';
+    if (ext === '.header') contentType = 'application/octet-stream';
     
     return new NextResponse(data, {
       status: 200,
       headers: {
         'Content-Type': contentType,
+        'Cache-Control': 'public, max-age=31536000, immutable',
         'Access-Control-Allow-Origin': '*',
-        'Cache-Control': 'public, max-age=31536000, immutable', // Cache for 1 year
       },
     });
-  } catch (error) {
-    console.error(`[Cache Proxy] Error fetching ${path}:`, error);
-    return new NextResponse(`Error fetching ${path}`, { 
-      status: 500,
+  } catch (error: any) {
+    console.error('[Cache API] Failed to serve file', {
+      error: error?.message,
+      params: params.path,
+    });
+    
+    return new NextResponse('Cache file not found', { 
+      status: 404,
       headers: {
         'Access-Control-Allow-Origin': '*',
       },
