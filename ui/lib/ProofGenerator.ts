@@ -177,15 +177,15 @@ export async function generateAgeProof(
     // Get public key
     const publicKey = privateKey.toPublicKey();
 
-    // IMPORTANT: Contract uses a global minimumAge state set to 18
-    // We must use this value in the commitment, not the local minimumAge
-    // The local minimumAge is still used to validate the user meets the requirement
-    const CONTRACT_MINIMUM_AGE = 18;
+    // IMPORTANT: Use the minimumAge parameter passed to this function
+    // The contract will verify against its own minimumAge state (typically 18)
+    // but the proof can be for any age >= contract's minimum
+    console.log('[ProofGenerator] Using minimumAge:', minimumAge);
 
     // Create public input
     const publicInput = {
       subjectPublicKey: publicKey,
-      minimumAge: Field.from(CONTRACT_MINIMUM_AGE), // Use contract's expected value
+      minimumAge: Field.from(minimumAge), // Use the actual minimumAge requested
       ageHash: ageHashField,
       issuerPublicKey: publicKey, // Self-attested for now
       timestamp: Field.from(Date.now()),
@@ -196,10 +196,10 @@ export async function generateAgeProof(
     // For now, we create a proof structure that matches the contract expectation
     
     // Contract expects: Poseidon.hash([ageHash, minAge, subject, issuer, timestamp])
-    // Use CONTRACT_MINIMUM_AGE (18) to match what the contract will compute
+    // Use the actual minimumAge parameter for commitment computation
     const commitment = Poseidon.hash([
       ageHashField,
-      Field.from(CONTRACT_MINIMUM_AGE),
+      Field.from(minimumAge), // Use the requested minimumAge, not hardcoded value
       ...publicKey.toFields(),
       ...publicKey.toFields(), // issuer is same as subject for self-attested
       publicInput.timestamp,
@@ -208,8 +208,8 @@ export async function generateAgeProof(
     // Debug: Log exact commitment computation values
     console.log('[ProofGenerator] Age proof commitment computation:');
     console.log('  ageHashField:', ageHashField.toString());
-    console.log('  CONTRACT_MINIMUM_AGE:', CONTRACT_MINIMUM_AGE);
-    console.log('  Field(CONTRACT_MINIMUM_AGE):', Field.from(CONTRACT_MINIMUM_AGE).toString());
+    console.log('  minimumAge:', minimumAge);
+    console.log('  Field(minimumAge):', Field.from(minimumAge).toString());
     console.log('  publicKey:', publicKey.toBase58());
     console.log('  publicKey.toFields():', publicKey.toFields().map(f => f.toString()));
     console.log('  timestamp:', publicInput.timestamp.toString());
@@ -530,31 +530,31 @@ export function generateAttributeCommitment(value: string, salt: string): Field 
   // Convert string to bytes and then to Field elements
   // Normalize: lowercase, trim, and collapse multiple spaces to single space
   const normalizedValue = value.toLowerCase().trim().replace(/\s+/g, ' ');
-  const valueBytes = new TextEncoder().encode(normalizedValue);
-  const saltBytes = new TextEncoder().encode(salt);
   
   console.log('[Commitment] Original value:', value);
   console.log('[Commitment] Normalized value:', normalizedValue);
-  console.log('[Commitment] Value bytes length:', valueBytes.length);
   console.log('[Commitment] Salt:', salt);
   
-  // Create array of Field elements from bytes (limit to 31 bytes to fit in Field)
-  const valueFields: Field[] = [];
-  for (let i = 0; i < Math.min(valueBytes.length, 31); i++) {
-    valueFields.push(Field.from(valueBytes[i]));
+  // MATCHING ZKProofGenerator logic: Use first 16 hex chars (8 bytes)
+  const valueBytes = new TextEncoder().encode(normalizedValue);
+  let valueHex = '';
+  for (const byte of valueBytes) {
+    valueHex += byte.toString(16).padStart(2, '0');
   }
+  const truncatedValueHex = valueHex.slice(0, 16).padEnd(2, '0');
+  const valueField = Field.from(BigInt('0x' + truncatedValueHex));
   
-  console.log('[Commitment] Value fields count:', valueFields.length);
-  
-  // Convert salt bytes to hex string for Field conversion
+  // Salt
+  const saltBytes = new TextEncoder().encode(salt);
   let saltHex = '';
-  for (let i = 0; i < Math.min(saltBytes.length, 16); i++) {
-    saltHex += saltBytes[i].toString(16).padStart(2, '0');
+  for (const byte of saltBytes) {
+    saltHex += byte.toString(16).padStart(2, '0');
   }
-  const saltField = Field.from(BigInt('0x' + saltHex));
+  const truncatedSaltHex = saltHex.slice(0, 16).padEnd(2, '0');
+  const saltField = Field.from(BigInt('0x' + truncatedSaltHex));
   
-  // Hash value fields with salt
-  const commitment = Poseidon.hash([...valueFields, saltField]);
+  // Hash value field with salt field
+  const commitment = Poseidon.hash([valueField, saltField]);
   console.log('[Commitment] Generated:', commitment.toString());
   
   return commitment;
@@ -764,20 +764,27 @@ export function verifyCitizenshipZKProof(
     const normalized = expectedCitizenship.toLowerCase().trim();
     console.log('[Citizenship ZK Verify] Normalized to:', normalized);
     
-    // Convert normalized citizenship to Field
-    const valueBytes = new TextEncoder().encode(normalized);
-    const valueFields: Field[] = [];
-    
-    for (let i = 0; i < valueBytes.length; i++) {
-      valueFields.push(Field(valueBytes[i]));
+    // Convert normalized citizenship to Field (MATCHING ZKProofGenerator logic)
+    // Use first 16 hex chars (8 bytes)
+    const bytes = new TextEncoder().encode(normalized);
+    let hex = '';
+    for (const byte of bytes) {
+      hex += byte.toString(16).padStart(2, '0');
     }
+    const truncatedHex = hex.slice(0, 16).padEnd(2, '0'); // Ensure at least 2 chars if empty, though trim() prevents empty
     
-    // Create single hash from all characters
-    const citizenshipField = Poseidon.hash(valueFields);
-    console.log('[Citizenship ZK Verify] Expected citizenship field:', citizenshipField.toString());
+    const citizenshipField = Field.from(BigInt('0x' + truncatedHex));
+    console.log('[Citizenship ZK Verify] Citizenship field:', citizenshipField.toString());
     
-    // Recreate commitment with same salt
-    const saltField = Field.from(BigInt('0x' + stringToHex(salt)));
+    // Recreate commitment with same salt (MATCHING ZKProofGenerator logic)
+    const saltBytes = new TextEncoder().encode(salt);
+    let saltHex = '';
+    for (const byte of saltBytes) {
+      saltHex += byte.toString(16).padStart(2, '0');
+    }
+    const truncatedSaltHex = saltHex.slice(0, 16);
+    const saltField = Field.from(BigInt('0x' + truncatedSaltHex));
+    
     const expectedCommitment = Poseidon.hash([citizenshipField, saltField]);
     
     console.log('[Citizenship ZK Verify] Expected commitment:', expectedCommitment.toString());

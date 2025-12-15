@@ -7,14 +7,21 @@
   },
   "contracts": {
     "didRegistry": {
-      "address": "B62qpbUHoMv58PZgTzTnUyifrNUpmBvaemkj6RbaknDsZZQVUv6Pwaq",
+      "address": "B62qmv8SmrThvLXaH5zN1eKhPMEEL22coRaeezFM8f4yWNGj6CJ13EH",
       "network": "devnet",
-      "deployedAt": "2025-12-09T03:57:16.007Z"
+      "deployedAt": "2025-12-11T18:12:23.499Z"
     },
     "zkpVerifier": {
-      "address": "B62qnt54Z5qY4EGQgWcXPrt63cn5ugHK6Sr6jbtCpxaywZKxZ8nnvBQ",
+      "address": "B62qjxzdqgsRhxMSsUSEYFTdHwqRd7TY9Cu1SLmfECYnaktL1xbW5Sz",
       "network": "devnet",
-      "deployedAt": "2025-12-09T03:57:16.007Z"
+      "deployedAt": "2025-12-11T18:12:23.501Z"
+    }
+  },
+  "deployedContracts": {
+    "devnet": {
+      "didRegistry": "B62qmv8SmrThvLXaH5zN1eKhPMEEL22coRaeezFM8f4yWNGj6CJ13EH",
+      "zkpVerifier": "B62qjxzdqgsRhxMSsUSEYFTdHwqRd7TY9Cu1SLmfECYnaktL1xbW5Sz",
+      "deployedAt": "2025-12-11T18:12:23.501Z"
     }
   }
 }

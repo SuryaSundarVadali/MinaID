@@ -5,6 +5,8 @@
  * with intelligent retry logic to improve reliability.
  */
 
+import { checkBlockberryTransaction } from './BlockberryMonitor';
+
 export type TransactionStatus = 
   | 'pending'
   | 'in-progress'
@@ -33,10 +35,10 @@ export interface MonitorConfig {
 
 const DEFAULT_CONFIG: Required<Omit<MonitorConfig, 'onStatusChange'>> = {
   maxAttempts: 10,
-  initialDelay: 2000,      // 2 seconds
-  maxDelay: 30000,         // 30 seconds
+  initialDelay: 200000,      // 200 seconds
+  maxDelay: 1000000,         // 1000 seconds
   backoffMultiplier: 1.5,
-  timeout: 300000          // 5 minutes total timeout
+  timeout: 600000          // 10 minutes total timeout
 };
 
 export class TransactionMonitor {
@@ -162,18 +164,28 @@ export class TransactionMonitor {
 }
 
 /**
- * Helper to check Mina transaction status using GraphQL
+ * Helper to check Mina transaction status using Blockberry API with GraphQL fallback
  */
 export async function checkMinaTransaction(
   txHash: string,
   graphqlEndpoint: string = 'https://api.minascan.io/node/devnet/v1/graphql'
 ): Promise<{ included: boolean; failed?: boolean; error?: string }> {
   try {
+    // Primary: Try Blockberry API
+    const blockberryKey = process.env.NEXT_PUBLIC_BLOCKBERRY_API_KEY;
+    if (blockberryKey) {
+      const bbResult = await checkBlockberryTransaction(txHash, blockberryKey);
+      // Only return immediately if we get a definitive result
+      if (bbResult.included || bbResult.failed) {
+        return bbResult;
+      }
+    }
+
+    // Fallback: Use GraphQL if Blockberry doesn't have it yet
     const query = `
-      query GetTransaction($hash: String!) {
-        transaction(hash: $hash) {
-          hash
-          status
+      query GetTransactionStatus($hash: String!) {
+        transactionStatus(zkappTransaction: $hash)
+        pooledZkappCommands(hashes: [$hash]) {
           failureReason
         }
       }
@@ -189,20 +201,32 @@ export async function checkMinaTransaction(
     });
 
     const data = await response.json();
-    const tx = data?.data?.transaction;
-
-    if (!tx) {
+    
+    if (data.errors) {
+      console.warn('[checkMinaTransaction] GraphQL errors:', data.errors);
+      // Transaction might not be indexed yet
       return { included: false };
     }
+    
+    const status = data?.data?.transactionStatus;
+    const pooledCommands = data?.data?.pooledZkappCommands || [];
+    const pooledCommand = pooledCommands.length > 0 ? pooledCommands[0] : null;
 
-    if (tx.status === 'INCLUDED' || tx.status === 'applied') {
+    // Check for failure in pooled commands
+    if (pooledCommand && pooledCommand.failureReason) {
+       // If there's a failure reason, it failed
+       return { included: false, failed: true, error: JSON.stringify(pooledCommand.failureReason) };
+    }
+
+    if (status === 'INCLUDED') {
       return { included: true };
     }
-
-    if (tx.status === 'FAILED' || tx.failureReason) {
-      return { included: false, failed: true, error: tx.failureReason };
+    
+    if (status === 'FAILED') {
+       return { included: false, failed: true, error: 'Transaction status is FAILED' };
     }
 
+    // PENDING or UNKNOWN
     return { included: false };
   } catch (error) {
     console.warn('[checkMinaTransaction] Error:', error);

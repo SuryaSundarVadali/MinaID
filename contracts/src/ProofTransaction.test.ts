@@ -175,7 +175,8 @@ describe('Proof Transaction Tests - End-to-End', () => {
           ageHash,
           proofOutput,
           issuer,
-          timestamp
+          timestamp,
+          Field(18)
         );
       });
       await verifyTx.prove();
@@ -228,7 +229,8 @@ describe('Proof Transaction Tests - End-to-End', () => {
           ageHash,
           proofOutput,
           issuer,
-          timestamp
+          timestamp,
+          Field(18)
         );
       });
       await verifyTx.prove();
@@ -343,7 +345,8 @@ describe('Proof Transaction Tests - End-to-End', () => {
           ageHash,
           proofOutput,
           issuer,
-          timestamp
+          timestamp,
+          Field(18)
         );
       });
       await verifyTx.prove();
@@ -445,7 +448,8 @@ describe('Proof Transaction Tests - End-to-End', () => {
             ageHash,
             proofOutput,
             issuer,
-            timestamp
+            timestamp,
+            Field(18)
           );
         });
         await verifyTx.prove();
@@ -478,7 +482,8 @@ describe('Proof Transaction Tests - End-to-End', () => {
             ageHash,
             invalidProof,
             issuer,
-            Field(Date.now())
+            Field(Date.now()),
+            Field(18)
           );
         });
         await verifyTx.prove();
@@ -562,7 +567,8 @@ describe('Proof Transaction Tests - End-to-End', () => {
           ageHash,
           proofOutput,
           issuer,
-          timestamp
+          timestamp,
+          Field(18)
         );
       });
       await verifyTx.prove();

@@ -22,6 +22,12 @@ import { validateProofForSubmission, quickValidate } from '../lib/PreSubmissionV
 import { submitTransaction, canSubmit, SubmissionResult } from '../lib/RobustTransactionSubmitter';
 import { monitorTransaction, TxStatus, getStatusMessage, formatTimeRemaining } from '../lib/CompleteTransactionMonitor';
 import { GeneratedProof } from '../lib/SmartProofGenerator';
+import { Field, PublicKey, Signature, Poseidon } from 'o1js';
+import { 
+  generateAttributeCommitment, 
+  verifySelectiveDisclosureProof, 
+  verifyCitizenshipZKProof 
+} from '../lib/ProofGenerator';
 
 export type VerificationResult = {
   id: string;
@@ -137,9 +143,9 @@ export function VerifierDashboard() {
         throw new Error('Citizenship verification requires Name and Citizenship fields');
       }
 
-      // Import o1js for cryptographic verification
-      const { PublicKey, Signature, Field } = await import('o1js');
-      const { verifySelectiveDisclosureProof, verifyCitizenshipZKProof } = await import('../lib/ProofGenerator');
+      // Use static imports instead of dynamic ones
+      // const { PublicKey, Signature, Field } = await import('o1js');
+      // const { verifySelectiveDisclosureProof, verifyCitizenshipZKProof, generateAttributeCommitment } = await import('../lib/ProofGenerator');
 
       let credentialChecks: any = {};
       let cryptoVerified = false;
@@ -148,15 +154,21 @@ export function VerifierDashboard() {
       // Parse the proof data
       let parsedProof: any = {};
       try {
+        console.log('[Verify] Raw proof data type:', typeof proofData.proof);
         parsedProof = typeof proofData.proof === 'string' ? JSON.parse(proofData.proof) : proofData.proof;
-      } catch {}
+        console.log('[Verify] Parsed proof keys:', Object.keys(parsedProof));
+      } catch (e) {
+        console.error('[Verify] Failed to parse proof JSON:', e);
+      }
 
       // Get public key from proof
       let userPublicKey: any = null;
       try {
         if (parsedProof?.publicKey) {
+          console.log('[Verify] Using public key from proof:', parsedProof.publicKey);
           userPublicKey = PublicKey.fromBase58(parsedProof.publicKey);
         } else {
+          console.log('[Verify] Using public key from DID:', subjectDID);
           userPublicKey = PublicKey.fromBase58(subjectDID.replace('did:mina:', ''));
         }
       } catch (e) {
@@ -167,23 +179,146 @@ export function VerifierDashboard() {
       setVerificationStatus('Verifying signature...');
 
       // ========== CLIENT-SIDE CRYPTOGRAPHIC VERIFICATION ==========
-      if (parsedProof?.signature && parsedProof?.commitment && userPublicKey) {
+      
+      // 1. Check for ZK Proofs (Citizenship/Name) - Verify Hash Commitment
+      if ((proofType === 'citizenship' || proofType === 'name') && proofData.publicInput && selectiveDisclosure?.salt) {
         try {
-          const signature = Signature.fromBase58(parsedProof.signature);
-          const commitment = Field(parsedProof.commitment);
-          const isValidSignature = signature.verify(userPublicKey, [commitment]);
-          cryptoVerified = isValidSignature.toBoolean();
-          console.log('[Verify] Signature verification:', cryptoVerified);
-        } catch (sigError) {
-          console.warn('[Verify] Signature verification failed:', sigError);
-          cryptoVerified = false;
+          const publicHash = proofData.publicInput.citizenshipHash || proofData.publicInput.nameHash;
+          const input = proofType === 'citizenship' ? expectedCitizenship : expectedName;
+          
+          if (publicHash && input) {
+            console.log(`[Verify] Verifying ${proofType} hash commitment...`);
+            const calculatedCommitment = generateAttributeCommitment(input, selectiveDisclosure.salt);
+            
+            if (calculatedCommitment.toString() === publicHash) {
+              console.log(`[Verify] ${proofType} hash verified successfully!`);
+              cryptoVerified = true;
+              
+              // Set credential check result
+              if (proofType === 'citizenship') {
+                credentialChecks.citizenship = { expected: input, matches: true };
+              } else {
+                credentialChecks.name = { expected: input, matches: true };
+              }
+            } else {
+              console.warn(`[Verify] ${proofType} hash mismatch!`);
+              console.warn(`Expected: ${publicHash}`);
+              console.warn(`Calculated: ${calculatedCommitment.toString()}`);
+            }
+          }
+        } catch (err) {
+          console.error('[Verify] ZK hash verification failed:', err);
+        }
+      }
+
+      // 1.5 Check for Age Proofs - Verify Hash Commitment (True ZK)
+      if ((proofType.startsWith('age') || proofType === 'age18' || proofType === 'age21') && proofData.publicInput && proofData.publicOutput) {
+        try {
+          console.log('[Verify] Verifying Age Proof commitment...');
+          const { publicInput, publicOutput } = proofData;
+          
+          // Extract fields
+          const ageHash = Field(publicInput.ageHash || publicInput.kycHash || '0');
+          const minAge = Field(publicInput.minimumAge || '18');
+          const subject = PublicKey.fromBase58(publicInput.subjectPublicKey);
+          const issuer = PublicKey.fromBase58(publicInput.issuerPublicKey);
+          const timestamp = Field(publicInput.timestamp || 0);
+          
+          // Reconstruct commitment
+          // Must match ZKPVerifier.verifyAgeProof logic
+          const expectedCommitment = Poseidon.hash([
+            ageHash,
+            minAge,
+            ...subject.toFields(),
+            ...issuer.toFields(),
+            timestamp,
+          ]);
+          
+          const actualCommitment = Field(publicOutput);
+          
+          console.log('[Verify] Expected Commitment:', expectedCommitment.toString());
+          console.log('[Verify] Actual Commitment:  ', actualCommitment.toString());
+          
+          if (expectedCommitment.equals(actualCommitment).toBoolean()) {
+            console.log('[Verify] Age Proof commitment verified successfully!');
+            cryptoVerified = true;
+          } else {
+            console.warn('[Verify] Age Proof commitment mismatch!');
+          }
+        } catch (err) {
+          console.error('[Verify] Age Proof verification failed:', err);
+        }
+      }
+
+      // 1.6 Check for KYC Proofs - Verify Hash Commitment
+      if (proofType === 'kyc' && proofData.publicInput && proofData.publicOutput) {
+        try {
+          console.log('[Verify] Verifying KYC Proof commitment...');
+          const { publicInput, publicOutput } = proofData;
+          
+          // Extract fields
+          const kycHash = Field(publicInput.kycHash || '0');
+          const subject = PublicKey.fromBase58(publicInput.subjectPublicKey);
+          const issuer = PublicKey.fromBase58(publicInput.issuerPublicKey);
+          
+          // Reconstruct commitment
+          // Must match ZKPVerifier.verifyKYCProof logic
+          const expectedCommitment = Poseidon.hash([
+            kycHash,
+            ...subject.toFields(),
+            ...issuer.toFields(),
+            Field(1),
+          ]);
+          
+          const actualCommitment = Field(publicOutput);
+          
+          console.log('[Verify] Expected Commitment:', expectedCommitment.toString());
+          console.log('[Verify] Actual Commitment:  ', actualCommitment.toString());
+          
+          if (expectedCommitment.equals(actualCommitment).toBoolean()) {
+            console.log('[Verify] KYC Proof commitment verified successfully!');
+            cryptoVerified = true;
+            credentialChecks.kyc = { expected: "Verified Identity", matches: true };
+          } else {
+            console.warn('[Verify] KYC Proof commitment mismatch!');
+          }
+        } catch (err) {
+          console.error('[Verify] KYC Proof verification failed:', err);
+        }
+      }
+      
+      // 2. Fallback to Legacy Signature Verification (if not already verified)
+      if (!cryptoVerified) {
+        console.log('[Verify] Attempting signature verification...');
+        if (parsedProof?.signature && parsedProof?.commitment && userPublicKey) {
+          try {
+            console.log('[Verify] Verifying signature...');
+            console.log('[Verify] Public Key:', userPublicKey.toBase58());
+            console.log('[Verify] Commitment:', parsedProof.commitment);
+            console.log('[Verify] Signature:', parsedProof.signature);
+            
+            const signature = Signature.fromBase58(parsedProof.signature);
+            const commitment = Field(parsedProof.commitment);
+            const isValidSignature = signature.verify(userPublicKey, [commitment]);
+            cryptoVerified = isValidSignature.toBoolean();
+            console.log('[Verify] Signature verification result:', cryptoVerified);
+          } catch (sigError) {
+            console.error('[Verify] Signature verification failed with error:', sigError);
+            cryptoVerified = false;
+          }
+        } else {
+          console.warn('[Verify] Skipping signature verification. Missing data:', {
+            hasSignature: !!parsedProof?.signature,
+            hasCommitment: !!parsedProof?.commitment,
+            hasPublicKey: !!userPublicKey
+          });
         }
       }
 
       setVerificationProgress(40);
       
-      // Verify selective disclosure proofs if present
-      if (selectiveDisclosure?.salt && userPublicKey) {
+      // Verify selective disclosure proofs if present (Legacy support)
+      if (!cryptoVerified && selectiveDisclosure?.salt && userPublicKey) {
         if (expectedName.trim() && selectiveDisclosure.name) {
           try {
             const isValid = verifySelectiveDisclosureProof(
@@ -240,14 +375,33 @@ export function VerifierDashboard() {
             const submissionResult = await submitTransaction(
               proofData as GeneratedProof,
               async () => {
-                // Build verification transaction
-                // For now, just return the proof data as JSON
-                // The actual transaction will be signed by the wallet
-                return JSON.stringify({
-                  type: 'verification',
-                  proof: proofData,
-                  timestamp: Date.now(),
-                });
+                // Build verification transaction using ContractInterface
+                const contractInterface = await getContractInterface();
+                
+                // Get wallet account
+                const accounts = await (window as any).mina.requestAccounts();
+                if (!accounts || accounts.length === 0) {
+                  throw new Error('Please connect your wallet');
+                }
+                const verifierAddress = accounts[0];
+                
+                // Determine expected data override
+                let expectedData = undefined;
+                if (proofType === 'citizenship' && expectedCitizenship.trim()) {
+                  expectedData = expectedCitizenship.trim();
+                } else if (proofType === 'name' && expectedName.trim()) {
+                  expectedData = expectedName.trim();
+                }
+
+                const tx = await contractInterface.buildVerificationTransaction(
+                  proofData,
+                  verifierAddress,
+                  expectedData
+                );
+                
+                // Prove and return JSON
+                await tx.prove();
+                return tx.toJSON();
               },
               {
                 onAttempt: (attempt, max) => {

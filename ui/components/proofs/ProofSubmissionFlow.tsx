@@ -9,29 +9,25 @@
 
 import React, { useState, useCallback } from 'react';
 import { PrivateKey } from 'o1js';
-import { 
-  generateAgeProofSmart, 
-  GeneratedProof,
-  isProofGenerating 
-} from '@/lib/SmartProofGenerator';
-import { 
-  validateProofForSubmission, 
-  quickValidate 
+import {
+  generateAgeProofZK,
+  compileAgeProgram,
+  ZKProofData
+} from '@/lib/ZKProofGenerator';
+import {
+  validateProofForSubmission,
+  quickValidate
 } from '@/lib/PreSubmissionValidator';
-import { 
-  submitTransaction, 
-  canSubmit, 
-  SubmissionResult 
-} from '@/lib/RobustTransactionSubmitter';
-import { 
-  monitorTransaction, 
-  TxStatus, 
-  getStatusMessage, 
+import { ContractInterface } from '@/lib/ContractInterface';
+import {
+  monitorTransaction,
+  TxStatus,
+  getStatusMessage,
   formatTimeRemaining,
-  estimateConfirmationTime 
+  estimateConfirmationTime
 } from '@/lib/CompleteTransactionMonitor';
 
-type FlowStep = 
+type FlowStep =
   | 'idle'
   | 'generating'
   | 'validating'
@@ -42,7 +38,7 @@ type FlowStep =
 
 interface ProofSubmissionFlowProps {
   walletAddress: string;
-  onComplete?: (result: { proof: GeneratedProof; txHash: string }) => void;
+  onComplete?: (result: { proof: ZKProofData; txHash: string }) => void;
   onError?: (error: string) => void;
 }
 
@@ -55,21 +51,22 @@ export default function ProofSubmissionFlow({
   const [age, setAge] = useState('');
   const [salt, setSalt] = useState('');
   const [minAge, setMinAge] = useState('18');
-  
+
   // Flow state
   const [step, setStep] = useState<FlowStep>('idle');
   const [progress, setProgress] = useState(0);
   const [statusMessage, setStatusMessage] = useState('');
-  
+
   // Results
-  const [proof, setProof] = useState<GeneratedProof | null>(null);
+  const [proof, setProof] = useState<ZKProofData | null>(null);
   const [txHash, setTxHash] = useState<string>('');
   const [txStatus, setTxStatus] = useState<TxStatus>('unknown');
   const [error, setError] = useState<string>('');
-  
+
   // Retry state
   const [retryCount, setRetryCount] = useState(0);
   const [retryDelay, setRetryDelay] = useState(0);
+  const [isCompiled, setIsCompiled] = useState(false);
 
   /**
    * Generate random salt
@@ -106,7 +103,7 @@ export default function ProofSubmissionFlow({
       // Validate inputs
       const ageNum = parseInt(age, 10);
       const minAgeNum = parseInt(minAge, 10);
-      
+
       if (isNaN(ageNum) || ageNum < 0 || ageNum > 150) {
         throw new Error('Please enter a valid age (0-150)');
       }
@@ -116,99 +113,84 @@ export default function ProofSubmissionFlow({
       if (ageNum < minAgeNum) {
         throw new Error(`Your age (${ageNum}) is less than minimum required (${minAgeNum})`);
       }
-      
-      // Check wallet readiness
-      const walletCheck = canSubmit();
-      if (!walletCheck.ready) {
-        throw new Error(walletCheck.reason || 'Wallet not ready');
+
+      // STEP 0: Compile ZK Program (if not done)
+      if (!isCompiled) {
+        setStep('generating');
+        setProgress(0);
+        setStatusMessage('Compiling zero-knowledge circuits (one-time)...');
+
+        await compileAgeProgram((msg, pct) => {
+          setStatusMessage(msg);
+          setProgress(pct * 0.1); // 0-10%
+        });
+
+        setIsCompiled(true);
       }
-      
-      // STEP 1: Generate Proof
+
+      // STEP 1: Generate ZK Proof OFF-CHAIN
       setStep('generating');
-      setProgress(0);
-      setStatusMessage('Generating proof...');
-      
+      setProgress(10);
+      setStatusMessage('Generating zero-knowledge proof (2-3 minutes)...');
+
       // Derive private key from wallet address (for demo - in production use wallet signing)
       const privateKey = PrivateKey.random(); // In real app, use wallet
-      
-      const generatedProof = await generateAgeProofSmart(
+
+      const generatedProof = await generateAgeProofZK(
         ageNum,
-        salt,
         minAgeNum,
         privateKey,
+        salt,
         (message, percent) => {
           setStatusMessage(message);
-          setProgress(percent * 0.3); // 0-30%
+          setProgress(10 + (percent * 0.3)); // 10-40%
         }
       );
-      
+
       setProof(generatedProof);
-      
-      // STEP 2: Validate
-      setStep('validating');
-      setProgress(30);
-      setStatusMessage('Validating proof...');
-      
-      const validation = await validateProofForSubmission(generatedProof);
-      if (!validation.isValid) {
-        throw new Error(`Validation failed: ${validation.errors.join(', ')}`);
-      }
-      
-      setProgress(40);
-      
-      // STEP 3: Submit Transaction
+      console.log('✅ Proof generated OFF-CHAIN:', generatedProof.metadata.proofId);
+
+      // STEP 2: Submit Proof to Blockchain (VERIFICATION ONLY - ON-CHAIN)
       setStep('submitting');
-      setStatusMessage('Submitting to blockchain...');
-      
-      const submissionResult = await submitTransaction(
+      setProgress(50);
+      setStatusMessage('Submitting proof for on-chain verification...');
+
+      const contract = new ContractInterface({
+        minaEndpoint: 'https://proxy.devnet.minaexplorer.com/graphql',
+        archiveEndpoint: 'https://archive.devnet.minaexplorer.com',
+        networkId: 'devnet',
+        didRegistryAddress: process.env.NEXT_PUBLIC_DID_REGISTRY_ADDRESS || '',
+        zkpVerifierAddress: process.env.NEXT_PUBLIC_ZKP_VERIFIER_ADDRESS || ''
+      });
+      await contract.initialize();
+
+      const submissionResult = await contract.verifyZKProofOnChain(
         generatedProof,
-        async () => {
-          // Build transaction JSON - this would call ContractInterface
-          // For now, return a placeholder
-          return JSON.stringify({
-            proof: generatedProof.proof,
-            publicInput: generatedProof.publicInput,
-          });
-        },
-        {
-          onAttempt: (attempt, max) => {
-            setStatusMessage(`Submission attempt ${attempt}/${max}...`);
-            setProgress(40 + (attempt / max) * 20); // 40-60%
-          },
-          onRetry: (delay, reason) => {
-            setRetryCount(c => c + 1);
-            setRetryDelay(delay);
-            setStatusMessage(`Retrying in ${Math.round(delay / 1000)}s: ${reason}`);
-          },
-          onSuccess: (hash) => {
-            setTxHash(hash);
-            setProgress(60);
-          },
-          onError: (err, type) => {
-            console.log(`Submission error (${type}): ${err}`);
-          },
-        }
+        privateKey.toBase58()
       );
-      
+
       if (!submissionResult.success) {
-        throw new Error(submissionResult.error || 'Submission failed');
+        throw new Error(submissionResult.error || 'On-chain verification failed');
       }
-      
-      // STEP 4: Monitor Transaction
+
+      console.log('✅ Proof VERIFIED ON-CHAIN:', submissionResult.hash);
+      setTxHash(submissionResult.hash || '');
+
+      // STEP 3: Monitor Transaction
       setStep('monitoring');
-      setTxHash(submissionResult.transactionHash || '');
-      setStatusMessage('Monitoring transaction...');
-      
+      setProgress(70);
+      setStatusMessage('Monitoring transaction confirmation...');
+
       const monitorResult = await monitorTransaction(
-        submissionResult.transactionHash || '',
+        submissionResult.hash || '',
         {
           onStatusChange: (status, message) => {
             setTxStatus(status);
             setStatusMessage(message);
           },
           onProgress: (elapsed, maxWait) => {
-            const monitorProgress = (elapsed / maxWait) * 40; // 60-100%
-            setProgress(60 + monitorProgress);
+            const monitorProgress = (elapsed / maxWait) * 30; // 70-100%
+            setProgress(70 + monitorProgress);
           },
           onConfirmed: () => {
             setProgress(100);
@@ -218,16 +200,16 @@ export default function ProofSubmissionFlow({
           },
         }
       );
-      
+
       if (monitorResult.status === 'confirmed') {
         // Success!
         setStep('confirmed');
         setStatusMessage('Transaction confirmed!');
         setProgress(100);
-        
+
         onComplete?.({
           proof: generatedProof,
-          txHash: submissionResult.transactionHash || '',
+          txHash: submissionResult.hash || '',
         });
       } else if (monitorResult.status === 'timeout') {
         // Timeout but might still confirm
@@ -236,7 +218,7 @@ export default function ProofSubmissionFlow({
       } else {
         throw new Error(monitorResult.failureReason || 'Transaction failed');
       }
-      
+
     } catch (err) {
       const errorMessage = err instanceof Error ? err.message : String(err);
       setError(errorMessage);
@@ -281,18 +263,17 @@ export default function ProofSubmissionFlow({
       <div className="flex justify-between mb-8">
         {(['generating', 'validating', 'submitting', 'monitoring', 'confirmed'] as FlowStep[]).map((s, i) => (
           <div key={s} className="flex flex-col items-center">
-            <div className={`w-8 h-8 rounded-full flex items-center justify-center border-2 ${
-              getStepColor(s).replace('text-', 'border-')
-            } ${step === s ? 'bg-blue-100 dark:bg-blue-900' : ''}`}>
+            <div className={`w-8 h-8 rounded-full flex items-center justify-center border-2 ${getStepColor(s).replace('text-', 'border-')
+              } ${step === s ? 'bg-blue-100 dark:bg-blue-900' : ''}`}>
               <span className={`text-sm font-medium ${getStepColor(s)}`}>
                 {stepOrder(step) > stepOrder(s) || step === 'confirmed' ? '✓' : i + 1}
               </span>
             </div>
             <span className={`text-xs mt-1 ${getStepColor(s)}`}>
-              {s === 'generating' ? 'Generate' : 
-               s === 'validating' ? 'Validate' :
-               s === 'submitting' ? 'Submit' :
-               s === 'monitoring' ? 'Monitor' : 'Done'}
+              {s === 'generating' ? 'Generate' :
+                s === 'validating' ? 'Validate' :
+                  s === 'submitting' ? 'Submit' :
+                    s === 'monitoring' ? 'Monitor' : 'Done'}
             </span>
           </div>
         ))}
@@ -411,7 +392,7 @@ export default function ProofSubmissionFlow({
                 {txHash}
               </p>
               <a
-                href={`https://minascan.io/devnet/tx/${txHash}`}
+                href={`https://minascan.io/devnet/tx/${txHash}?type=zk-tx`}
                 target="_blank"
                 rel="noopener noreferrer"
                 className="text-xs text-blue-500 hover:underline mt-1 inline-block"
@@ -430,18 +411,18 @@ export default function ProofSubmissionFlow({
                         flex items-center justify-center mx-auto">
             <span className="text-3xl">✓</span>
           </div>
-          
+
           <h3 className="text-lg font-semibold text-green-600 dark:text-green-400">
             Proof Submitted Successfully!
           </h3>
-          
+
           <p className="text-sm text-gray-600 dark:text-gray-400">
             Your age proof has been verified and recorded on the Mina blockchain.
           </p>
 
           {txHash && (
             <a
-              href={`https://minascan.io/devnet/tx/${txHash}`}
+              href={`https://minascan.io/devnet/tx/${txHash}?type=zk-tx`}
               target="_blank"
               rel="noopener noreferrer"
               className="inline-block px-4 py-2 bg-blue-600 text-white rounded-md 
@@ -468,11 +449,11 @@ export default function ProofSubmissionFlow({
                         flex items-center justify-center mx-auto">
             <span className="text-3xl">✗</span>
           </div>
-          
+
           <h3 className="text-lg font-semibold text-red-600 dark:text-red-400">
             Submission Failed
           </h3>
-          
+
           <p className="text-sm text-gray-600 dark:text-gray-400">
             {error}
           </p>

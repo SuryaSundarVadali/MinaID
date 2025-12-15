@@ -1,0 +1,38 @@
+
+> contracts@0.1.0 deploy
+> npm run build && node build/scripts/deploy.js
+
+
+> contracts@0.1.0 build
+> tsc
+
+
+> contracts@0.1.0 postbuild
+> npm run copy-cache
+
+
+> contracts@0.1.0 copy-cache
+> node build/scripts/copy-cache-to-ui.js
+
+Cache files copied to UI successfully
+╔═══════════════════════════════════════════╗
+║   MinaID Contract Deployment Script      ║
+║   Network: Berkeley Testnet              ║
+╚═══════════════════════════════════════════╝
+
+✅ Connected to Zeko Testnet (L2 on Mina)
+✅ Loaded deployer key from config
+🔑 Deployer address: B62qqWYLoCqdYTbBBEYBfyabrkWtAiNamjCsf3en5QiHE7d4irz2UN5
+
+📊 Checking deployer balance...
+⚠️  Could not check balance. Proceeding with deployment...
+
+🚀 Deploying DIDRegistry contract...
+   Contract address: B62qmXZAcMPTkzGCa7eEjY8USh26yJ4hTPCKMDcdRacr7fksxQmHhzX
+   Compiling contract...
+   ✅ Compilation complete
+   Creating deployment transaction...
+
+❌ Deployment failed:
+    getAccount: Could not find account for public key B62qqWYLoCqdYTbBBEYBfyabrkWtAiNamjCsf3en5QiHE7d4irz2UN5
+Graphql endpoint: https://devnet.zeko.io/graphql

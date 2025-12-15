@@ -121,6 +121,8 @@ export async function createO1JSCacheFromMerkle(merkleCache: MerkleCache): Promi
 
   let loaded = 0;
   let downloaded = 0;
+  let inMemoryOnly = 0;
+  let inIndexedDB = 0;
   const batchSize = 5; // Download 5 files at a time
 
   // Process in batches to avoid overwhelming the browser
@@ -131,9 +133,12 @@ export async function createO1JSCacheFromMerkle(merkleCache: MerkleCache): Promi
     console.log(`[O1JSCacheFromMerkle] Processing batch ${Math.floor(batchStart / batchSize) + 1}/${Math.ceil(baseFileIds.length / batchSize)}...`);
 
     await Promise.all(batch.map(async (fileId: string) => {
-      // Try to get from MerkleCache (IndexedDB)
-      let dataFile = await merkleCache.getFile(fileId);
-      let headerFile = await merkleCache.getFile(`${fileId}.header`);
+      // Proving keys are never stored in IndexedDB (memory-only to save quota)
+      const isProvingKey = fileId.includes('step-pk-') || fileId.includes('wrap-pk-');
+      
+      // Try to get from MerkleCache (IndexedDB) only if NOT a proving key
+      let dataFile = isProvingKey ? null : await merkleCache.getFile(fileId);
+      let headerFile = isProvingKey ? null : await merkleCache.getFile(`${fileId}.header`);
 
       // If not in cache, download from API
       if (!dataFile || !headerFile) {
@@ -152,14 +157,24 @@ export async function createO1JSCacheFromMerkle(merkleCache: MerkleCache): Promi
             dataFile = new Uint8Array(dataArrayBuffer);
             headerFile = new Uint8Array(headerArrayBuffer);
 
-            // Store in MerkleCache for future use
-            try {
-              await merkleCache.storeFile(fileId, dataFile);
-              await merkleCache.storeFileRaw(`${fileId}.header`, headerFile);
-              console.log(`[O1JSCacheFromMerkle] ✅ Cached ${fileId}`);
+            // Store in MerkleCache ONLY if it's a small file (verification keys, lagrange basis, srs)
+            // Proving keys (step-pk-*, wrap-pk-*) are kept in memory only to avoid IndexedDB quota issues
+            const isProvingKey = fileId.includes('step-pk-') || fileId.includes('wrap-pk-');
+            
+            if (!isProvingKey) {
+              try {
+                await merkleCache.storeFile(fileId, dataFile);
+                await merkleCache.storeFileRaw(`${fileId}.header`, headerFile);
+                console.log(`[O1JSCacheFromMerkle] ✅ Cached ${fileId} in IndexedDB`);
+                downloaded++;
+                inIndexedDB++;
+              } catch (storeError) {
+                console.warn(`[O1JSCacheFromMerkle] Failed to cache ${fileId}:`, storeError);
+              }
+            } else {
+              console.log(`[O1JSCacheFromMerkle] ✅ Loaded ${fileId} (memory only, ${Math.round(dataFile.length / 1024 / 1024)}MB)`);
               downloaded++;
-            } catch (storeError) {
-              console.warn(`[O1JSCacheFromMerkle] Failed to cache ${fileId}:`, storeError);
+              inMemoryOnly++;
             }
           } else {
             console.error(`[O1JSCacheFromMerkle] HTTP error for ${fileId}: ${dataResponse.status}/${headerResponse.status}`);
@@ -188,6 +203,7 @@ export async function createO1JSCacheFromMerkle(merkleCache: MerkleCache): Promi
   }
 
   console.log(`[O1JSCacheFromMerkle] ✅ Loaded ${loaded} files (${downloaded} downloaded)`);
+  console.log(`[O1JSCacheFromMerkle] 📊 Storage: ${inIndexedDB} in IndexedDB, ${inMemoryOnly} memory-only (proving keys)`);
 
   // Create o1js-compatible Cache object
   return {

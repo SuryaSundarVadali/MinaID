@@ -81,6 +81,8 @@ const WalletContext = createContext<WalletContextValue | undefined>(undefined);
 
 // Session duration: 1 hour
 const SESSION_DURATION = 60 * 60 * 1000;
+// Inactivity timeout: 10 minutes
+const INACTIVITY_TIMEOUT = 10 * 60 * 1000;
 
 interface WalletProviderProps {
   children: ReactNode;
@@ -91,6 +93,7 @@ export function WalletProvider({ children }: WalletProviderProps) {
   const [isLoading, setIsLoading] = useState(false);
   const [isSessionLoading, setIsSessionLoading] = useState(true); // True until session restoration completes
   const [error, setError] = useState<string | null>(null);
+  const [lastActivity, setLastActivity] = useState<number>(Date.now());
   const { authenticateWithPasskey } = usePasskey();
 
   const isConnected = session !== null && session.expiresAt > Date.now();
@@ -510,6 +513,97 @@ export function WalletProvider({ children }: WalletProviderProps) {
     }, 60000); // Check every minute
 
     return () => clearInterval(checkExpiry);
+  }, [session, logout]);
+
+  // Inactivity timeout: logout after 10 minutes of inactivity
+  useEffect(() => {
+    if (!session) return;
+
+    const handleActivity = () => {
+      setLastActivity(Date.now());
+    };
+
+    // Track user activity
+    const events = ['mousedown', 'keydown', 'scroll', 'touchstart', 'click'];
+    events.forEach(event => {
+      window.addEventListener(event, handleActivity);
+    });
+
+    // Check for inactivity every 30 seconds
+    const inactivityCheck = setInterval(() => {
+      const timeSinceLastActivity = Date.now() - lastActivity;
+      if (timeSinceLastActivity >= INACTIVITY_TIMEOUT) {
+        console.log('[WalletContext] Auto-logout due to inactivity');
+        logout();
+      }
+    }, 30000);
+
+    return () => {
+      events.forEach(event => {
+        window.removeEventListener(event, handleActivity);
+      });
+      clearInterval(inactivityCheck);
+    };
+  }, [session, lastActivity, logout]);
+
+  // Wallet event listeners: handle account/network changes
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+
+    const mina = (window as any).mina;
+    const ethereum = (window as any).ethereum;
+
+    // Auro Wallet: listen for account changes
+    const handleAuroAccountChange = (accounts: string[]) => {
+      console.log('[WalletContext] Auro account changed:', accounts);
+      if (!session) return;
+
+      const currentAuroWallet = session.wallets.find(w => w.type === 'auro');
+      if (currentAuroWallet && accounts[0] !== currentAuroWallet.address) {
+        console.warn('[WalletContext] Account mismatch detected - logging out for security');
+        logout();
+      }
+    };
+
+    // Metamask: listen for account changes
+    const handleMetamaskAccountChange = (accounts: string[]) => {
+      console.log('[WalletContext] Metamask account changed:', accounts);
+      if (!session) return;
+
+      const currentMetamaskWallet = session.wallets.find(w => w.type === 'metamask');
+      if (currentMetamaskWallet && accounts[0] !== currentMetamaskWallet.address) {
+        console.warn('[WalletContext] Account mismatch detected - logging out for security');
+        logout();
+      }
+    };
+
+    // Metamask: listen for chain changes
+    const handleChainChange = (chainId: string) => {
+      console.log('[WalletContext] Chain changed:', chainId);
+      // Could add logic here to verify user is on correct network
+      // For now, just log it
+    };
+
+    // Attach listeners
+    if (mina && mina.on) {
+      mina.on('accountsChanged', handleAuroAccountChange);
+    }
+
+    if (ethereum && ethereum.on) {
+      ethereum.on('accountsChanged', handleMetamaskAccountChange);
+      ethereum.on('chainChanged', handleChainChange);
+    }
+
+    // Cleanup
+    return () => {
+      if (mina && mina.removeListener) {
+        mina.removeListener('accountsChanged', handleAuroAccountChange);
+      }
+      if (ethereum && ethereum.removeListener) {
+        ethereum.removeListener('accountsChanged', handleMetamaskAccountChange);
+        ethereum.removeListener('chainChanged', handleChainChange);
+      }
+    };
   }, [session, logout]);
 
   const value: WalletContextValue = {

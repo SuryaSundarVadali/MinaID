@@ -41,10 +41,15 @@ function validateProofStructure(proof: GeneratedProof): string[] {
   if (proof.publicInput) {
     if (!proof.publicInput.subjectPublicKey) errors.push('Missing subject public key');
     if (!proof.publicInput.timestamp) errors.push('Missing timestamp');
-    // ageHash is only required for age and KYC proofs, not for selective disclosure proofs
-    const requiresAgeHash = ['age18', 'age21', 'kyc', 'age13', 'age16', 'age25', 'age65'].includes(proof.proofType) || proof.proofType.startsWith('age');
+    // ageHash is required for age proofs
+    const requiresAgeHash = ['age18', 'age21', 'age13', 'age16', 'age25', 'age65'].includes(proof.proofType) || (proof.proofType.startsWith('age') && proof.proofType !== 'age');
     if (requiresAgeHash && !proof.publicInput.ageHash) {
       errors.push('Missing age hash');
+    }
+    
+    // kycHash is required for KYC proofs
+    if (proof.proofType === 'kyc' && !proof.publicInput.kycHash && !proof.publicInput.ageHash) {
+      errors.push('Missing KYC hash');
     }
   }
   
@@ -110,21 +115,38 @@ function validateForContract(proof: GeneratedProof): string[] {
   
   try {
     // Parse the proof data
-    const proofData = JSON.parse(proof.proof);
+    const proofData = typeof proof.proof === 'string' ? JSON.parse(proof.proof) : proof.proof;
     
-    // Check required fields for contract verification
-    if (!proofData.signature) errors.push('Missing signature in proof');
-    if (!proofData.commitment) errors.push('Missing commitment in proof');
-    if (!proofData.publicKey) errors.push('Missing public key in proof');
+    // Check if this is a ZK proof (o1js) or Legacy proof (signed message)
+    // o1js proofs have 'maxProofsVerified' or 'proof' property
+    // Also check proofType to identify new ZK proof types
+    const isZKProof = ['kyc', 'citizenship', 'name'].includes(proof.proofType) || 
+                      proof.proofType.startsWith('age') ||
+                      proofData.maxProofsVerified !== undefined || 
+                      (proofData.proof && proofData.publicInput);
     
-    // For age proofs, check age hash
-    if (proof.proofType.startsWith('age') && !proofData.ageHash) {
-      errors.push('Missing age hash for age proof');
+    if (isZKProof) {
+      // ZK Proof Validation
+      // KYC proofs are commitment-based and might not have a proof string
+      if (proof.proofType !== 'kyc') {
+        if (!proofData.proof && !proofData.maxProofsVerified) {
+           errors.push('Missing ZK proof data');
+        }
+      }
+      // publicInput/publicOutput are checked in validateProofStructure (outer object)
+    } else {
+      // Legacy Proof Validation (Signed Message)
+      if (!proofData.signature) errors.push('Missing signature in proof');
+      if (!proofData.commitment) errors.push('Missing commitment in proof');
+      // publicKey might be in outer object or inner
+      if (!proofData.publicKey && !proof.publicInput?.subjectPublicKey) {
+        errors.push('Missing public key in proof');
+      }
     }
     
-    // For KYC proofs, check KYC hash
-    if (proof.proofType === 'kyc' && !proofData.kycHash) {
-      errors.push('Missing KYC hash for KYC proof');
+    // For age proofs, check age hash
+    if (proof.proofType.startsWith('age') && !proof.publicInput?.ageHash) {
+      // Already checked in validateProofStructure
     }
     
   } catch (e) {

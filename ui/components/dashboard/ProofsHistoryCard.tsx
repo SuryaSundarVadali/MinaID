@@ -52,6 +52,10 @@ export function ProofsHistoryCard() {
     );
   };
 
+  const getExplorerUrl = (hash: string) => {
+    return `https://minascan.io/devnet/tx/${hash}?type=zk-tx`;
+  };
+
   if (isLoading) {
     return (
       <div className="bg-white rounded-xl shadow-lg p-6">
@@ -70,7 +74,7 @@ export function ProofsHistoryCard() {
   return (
     <div className="bg-white rounded-xl shadow-lg p-6">
       <div className="flex items-center justify-between mb-6">
-        <h2 className="text-2xl font-bold text-gray-900">Proof History</h2>
+        <h2 className="text-2xl font-bold text-gray-900">Verification History</h2>
         <span className="text-sm text-gray-500">{proofs.length} proofs generated</span>
       </div>
 
@@ -105,7 +109,21 @@ export function ProofsHistoryCard() {
                       Generated {new Date(proof.timestamp).toLocaleString()}
                     </p>
                     
-                    {proof.metadata.verifierAddress && (
+                    {proof.txHash && (
+                      <div className="mt-1">
+                        <a 
+                          href={getExplorerUrl(proof.txHash)}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="text-xs text-indigo-600 hover:text-indigo-800 flex items-center space-x-1"
+                        >
+                          <span>Tx: {proof.txHash.substring(0, 10)}...{proof.txHash.substring(proof.txHash.length - 8)}</span>
+                          <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"></path></svg>
+                        </a>
+                      </div>
+                    )}
+                    
+                    {proof.metadata.verifierAddress && !proof.txHash && (
                       <p className="text-xs text-gray-500 mt-1">
                         Verifier: {proof.metadata.verifierAddress.substring(0, 20)}...
                       </p>

@@ -2,18 +2,24 @@
  * CredentialsCard.tsx
  * 
  * Display and manage user credentials with proof generation
- * Updated to use SmartProofGenerator for on-chain proof generation
+ * Updated to use ZKProofGenerator for TRUE OFF-CHAIN proof generation
  */
 
 'use client';
 
 import React, { useState, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
-import { generateAgeProofSmart, generateKYCProofSmart, GeneratedProof, isProofGenerating } from '../../lib/SmartProofGenerator';
-import { validateProofForSubmission, quickValidate } from '../../lib/PreSubmissionValidator';
-import { submitVerificationProof, canSubmit, SubmissionCallbacks } from '../../lib/RobustTransactionSubmitter';
+import {
+  generateAgeProofZK,
+  generateCitizenshipProofZK,
+  generateNameProofZK,
+  generateKYCProofZK,
+  compileAgeProgram,
+  compileCitizenshipProgram,
+  ZKProofData
+} from '../../lib/ZKProofGenerator';
 import { monitorTransaction, TxStatus, getStatusMessage, formatTimeRemaining, MonitoringCallbacks } from '../../lib/CompleteTransactionMonitor';
-import { getContractInterface } from '../../lib/ContractInterface';
+import { ContractInterface, DEFAULT_CONFIG } from '../../lib/ContractInterface';
 
 interface Credential {
   id: string;
@@ -45,7 +51,7 @@ export function CredentialsCard({
   const [showProofOptions, setShowProofOptions] = useState(false);
   const [showViewModal, setShowViewModal] = useState(false);
   const [isGenerating, setIsGenerating] = useState(false);
-  const [generatedProof, setGeneratedProof] = useState<GeneratedProof | null>(null);
+  const [generatedProof, setGeneratedProof] = useState<ZKProofData | null>(null);
   
   // Progress tracking for proof generation
   const [proofProgress, setProofProgress] = useState(0);
@@ -109,12 +115,12 @@ export function CredentialsCard({
     setShowProofOptions(true);
   };
 
-  // Generate specific proof type using SmartProofGenerator
+  // Generate specific proof type using ZKProofGenerator (OFF-CHAIN)
   const handleGenerateSpecificProof = async (proofType: string) => {
     if (!selectedCredential) return;
     
     // Check if already generating
-    if (isProofGenerating()) {
+    if (isGenerating) {
       alert('Proof generation already in progress. Please wait.');
       return;
     }
@@ -192,7 +198,7 @@ export function CredentialsCard({
         privateKey = PrivateKey.fromBigInt(seedNum);
       }
       
-      let proof: GeneratedProof | null = null;
+      let proof: ZKProofData | null = null;
       
       // Progress callback
       const onProgress = (message: string, percent: number) => {
@@ -209,59 +215,60 @@ export function CredentialsCard({
         actualAge--;
       }
       
+      // Generate TRUE zkSNARK proofs OFF-CHAIN
       switch (proofType) {
         case 'age':
         case 'age18':
-          proof = await generateAgeProofSmart(actualAge, salt, 18, privateKey, onProgress);
+          // Compile age program first
+          setProofStatus('Compiling zero-knowledge circuits (one-time)...');
+          await compileAgeProgram(onProgress);
+          
+          // Generate age 18+ proof OFF-CHAIN
+          proof = await generateAgeProofZK(actualAge, 18, privateKey, salt, onProgress);
+          console.log('✅ Age 18+ proof generated OFF-CHAIN');
           break;
           
         case 'age21':
-          proof = await generateAgeProofSmart(actualAge, salt, 21, privateKey, onProgress);
+          // Compile age program first
+          setProofStatus('Compiling zero-knowledge circuits (one-time)...');
+          await compileAgeProgram(onProgress);
+          
+          // Generate age 21+ proof OFF-CHAIN
+          proof = await generateAgeProofZK(actualAge, 21, privateKey, salt, onProgress);
+          console.log('✅ Age 21+ proof generated OFF-CHAIN');
           break;
           
         case 'kyc':
-          proof = await generateKYCProofSmart(
+          // KYC proof
+          setProofStatus('Generating KYC proof...');
+          proof = await generateKYCProofZK(
             { uid: parsedAadhar.uid, name: parsedAadhar.name, dateOfBirth: parsedAadhar.dateOfBirth },
             privateKey,
-            ['identity', 'name'],
+            salt,
             onProgress
           );
+          console.log('✅ KYC proof generated OFF-CHAIN');
           break;
           
         case 'name':
-        case 'citizenship':
-          // Use the existing proof generator for selective disclosure
-          const { generateSelectiveDisclosureProof, generateCitizenshipZKProof } = await import('../../lib/ProofGenerator');
-          const publicKey = privateKey.toPublicKey();
+          // Compile citizenship program (used for name proofs too)
+          setProofStatus('Compiling zero-knowledge circuits (one-time)...');
+          await compileCitizenshipProgram(onProgress);
           
-          if (proofType === 'name') {
-            const nameProof = generateSelectiveDisclosureProof(parsedAadhar.name, 'name', privateKey, salt);
-            const proofId = `proof_name_${Date.now()}`;
-            proof = {
-              proof: JSON.stringify({ commitment: nameProof.commitment, signature: nameProof.signature, publicKey: publicKey.toBase58() }),
-              publicInput: { subjectPublicKey: publicKey.toBase58(), minimumAge: '0', ageHash: nameProof.commitment, issuerPublicKey: publicKey.toBase58(), timestamp: Math.floor(Date.now() / 1000) },
-              publicOutput: nameProof.commitment,
-              proofType: 'name',
-              did: `did:mina:${publicKey.toBase58()}`,
-              timestamp: Date.now(),
-              metadata: { proofId, verificationKeyHash: 'client-side-v2', proofHash: nameProof.commitment.slice(0, 16), clientVersion: '2.0.0', generationTime: 100, generatedAt: new Date().toISOString() },
-              selectiveDisclosure: { salt, name: nameProof },
-            };
-          } else {
-            const citizenshipProof = generateCitizenshipZKProof(parsedAadhar.country || 'India', privateKey, salt);
-            const proofId = `proof_citizenship_${Date.now()}`;
-            proof = {
-              proof: JSON.stringify({ commitment: citizenshipProof.commitment, signature: citizenshipProof.signature, publicKey: publicKey.toBase58() }),
-              publicInput: { subjectPublicKey: publicKey.toBase58(), minimumAge: '0', ageHash: citizenshipProof.commitment, issuerPublicKey: publicKey.toBase58(), timestamp: Math.floor(Date.now() / 1000) },
-              publicOutput: citizenshipProof.commitment,
-              proofType: 'citizenship',
-              did: `did:mina:${publicKey.toBase58()}`,
-              timestamp: Date.now(),
-              metadata: { proofId, verificationKeyHash: 'client-side-v2', proofHash: citizenshipProof.commitment.slice(0, 16), clientVersion: '2.0.0', generationTime: 100, generatedAt: new Date().toISOString() },
-              selectiveDisclosure: { salt, citizenship: citizenshipProof },
-            };
-          }
-          setProofProgress(100);
+          // Generate name proof OFF-CHAIN
+          proof = await generateNameProofZK(parsedAadhar.name, privateKey, salt, onProgress);
+          console.log('✅ Name proof generated OFF-CHAIN');
+          break;
+          
+        case 'citizenship':
+          // Compile citizenship program first
+          setProofStatus('Compiling zero-knowledge circuits (one-time)...');
+          await compileCitizenshipProgram(onProgress);
+          
+          // Generate citizenship proof OFF-CHAIN
+          const citizenship = parsedAadhar.country || parsedAadhar.citizenship || 'India';
+          proof = await generateCitizenshipProofZK(citizenship, privateKey, salt, onProgress);
+          console.log('✅ Citizenship proof generated OFF-CHAIN');
           break;
           
         default:
@@ -269,154 +276,40 @@ export function CredentialsCard({
       }
       
       if (proof) {
-        // Step 1: Validate proof before submission
-        setProofStatus('Validating proof...');
-        const validation = await validateProofForSubmission(proof);
-        if (!validation.isValid) {
-          console.warn('[CredentialsCard] Proof validation warnings:', validation.errors);
-          throw new Error(`Validation failed: ${validation.errors.join(', ')}`);
-        }
-        
         // Save proof to localStorage
         const proofs = JSON.parse(localStorage.getItem(`proofs_${userIdentifier}`) || '[]');
         proofs.push({ ...proof, generatedAt: Date.now() });
         localStorage.setItem(`proofs_${userIdentifier}`, JSON.stringify(proofs));
         
-        setGeneratedProof(proof);
+        setGeneratedProof(proof as any); // Cast for UI compatibility
         
-        // Step 2: Register proof on blockchain (for ALL proof types)
-        setProofStatus('Registering proof on blockchain...');
+        // Step 2: Verify proof ON-CHAIN (only verification, proof was generated off-chain)
+        setProofStatus('Verifying proof on blockchain...');
         
         try {
-          // Get contract interface
-          const contractInterface = await getContractInterface();
+          // Initialize contract interface
+          // const contractInterface = new ContractInterface(DEFAULT_CONFIG);
+          // await contractInterface.initialize();
           
-          // Register proof commitment on-chain via DIDRegistry
-          setProofStatus('Creating registration transaction...');
-          const registrationResult = await contractInterface.registerProofCommitment(proof);
+          // Verify proof on-chain (ONLY verification, generation was off-chain)
+          // setProofStatus('Submitting proof for on-chain verification...');
+          // const registrationResult = await contractInterface.verifyZKProofOnChain(proof, privateKey.toBase58());
           
-          if (registrationResult.success && registrationResult.hash) {
-            setTxHash(registrationResult.hash);
-            setTxStatus('pending');
-            setShowOnChainModal(true);
-            setProofStatus(`Proof registration submitted! Hash: ${registrationResult.hash.slice(0, 10)}...`);
-            
-            // Monitor registration transaction
-            const monitorCallbacks: MonitoringCallbacks = {
-              onStatusChange: (status, message) => {
-                setTxStatus(status);
-                setProofStatus(message);
-                console.log('[CredentialsCard] Registration monitor:', status, message);
-              },
-              onProgress: (elapsed, maxWait) => {
-                const remaining = maxWait - elapsed;
-                setProofStatus(`Waiting for registration confirmation... ${formatTimeRemaining(remaining)}`);
-              },
-              onConfirmed: () => {
-                setTxStatus('confirmed');
-                setProofStatus('✅ Proof registered on-chain!');
-              },
-              onFailed: (reason) => {
-                setTxStatus('failed');
-                setProofStatus(`❌ Registration failed: ${reason}`);
-              },
-            };
-            
-            const monitorResult = await monitorTransaction(
-              registrationResult.hash,
-              monitorCallbacks
-            );
-            
-            if (monitorResult.status === 'confirmed') {
-              alert(`Success! Your ${proofType} proof has been registered on the Mina blockchain.\n\nTransaction: ${registrationResult.hash}`);
-            } else {
-              alert(`Registration transaction pending or failed. Check transaction: ${registrationResult.hash}`);
-            }
-          } else {
-            throw new Error(registrationResult.error || 'Proof registration failed');
-          }
+          // STOP HERE - Do not verify automatically
+          setProofStatus('✅ Proof generated successfully! Ready for verification.');
+          alert(`✅ ${proofType} proof generated successfully!\n\nYou can now verify this proof on the Verifier Dashboard.`);
+          
+          /* 
+          // Automatic verification removed as per user request
+          // Verification should happen separately in the Verifier Dashboard
+          */
         } catch (regError: any) {
           console.error('[CredentialsCard] Registration error:', regError);
           setProofStatus(`⚠️ Proof saved locally, but blockchain registration failed: ${regError.message}`);
-          alert(`Warning: Proof generated and saved locally, but blockchain registration failed:\n${regError.message}\n\nYou can still use the proof, but it won't be registered on-chain.`);
         }
         
-        // Step 3: For age/KYC proofs, also verify on-chain
-        const selectiveDisclosureProofs = ['name', 'citizenship', 'address', 'identity'];
-        if (!selectiveDisclosureProofs.includes(proofType)) {
-          // Age/KYC proofs - additionally verify on-chain
-          setProofStatus('Proof registered! Now verifying on-chain...');
-          
-          // Step 4: Submit verification transaction
-          try {
-            // Get contract interface
-            const contractInterface = await getContractInterface();
-            
-            // Callback handlers
-            const callbacks: SubmissionCallbacks = {
-              onAttempt: (attempt, maxAttempts) => {
-                setProofStatus(`Submitting to blockchain (attempt ${attempt}/${maxAttempts})...`);
-              },
-              onRetry: (delay, reason) => {
-                setProofStatus(`Retrying in ${(delay / 1000).toFixed(1)}s: ${reason}`);
-              },
-              onSuccess: (txHash) => {
-                setTxHash(txHash);
-                setProofStatus(`Transaction submitted! Hash: ${txHash.slice(0, 10)}...`);
-              },
-              onError: (error, errorType) => {
-                console.error('[CredentialsCard] Submission error:', error, errorType);
-              },
-            };
-            
-            setProofStatus('Submitting proof to blockchain...');
-            const result = await submitVerificationProof(proof, contractInterface, callbacks);
-            
-            if (result.success && result.transactionHash) {
-              setTxHash(result.transactionHash);
-              setTxStatus('pending');
-              // Modal already shown from registration
-              
-              // Step 5: Monitor verification transaction
-              const monitorCallbacks: MonitoringCallbacks = {
-                onStatusChange: (status, message) => {
-                  setTxStatus(status);
-                  setProofStatus(message);
-                  console.log('[CredentialsCard] Monitor status:', status, message);
-                },
-                onProgress: (elapsed, maxWait) => {
-                  const remaining = maxWait - elapsed;
-                  setProofStatus(`Waiting for confirmation... ${formatTimeRemaining(remaining)}`);
-                },
-                onConfirmed: (result) => {
-                  setTxStatus('confirmed');
-                  setProofStatus('✅ Proof submitted and confirmed on-chain!');
-                },
-                onFailed: (reason) => {
-                  setTxStatus('failed');
-                  setProofStatus(`❌ Transaction failed: ${reason}`);
-                },
-              };
-              
-              const monitorResult = await monitorTransaction(
-                result.transactionHash,
-                monitorCallbacks
-              );
-              
-              if (monitorResult.status === 'confirmed') {
-                alert('Success! Your proof has been confirmed on the Mina blockchain.');
-              } else if (monitorResult.status === 'failed') {
-                alert(`Transaction failed: ${monitorResult.failureReason}`);
-              }
-            } else {
-              throw new Error(result.error || 'Transaction submission failed');
-            }
-          } catch (txError: any) {
-            console.error('[CredentialsCard] Transaction error:', txError);
-            setProofStatus(`⚠️ Blockchain submission failed: ${txError.message}`);
-            alert(`Warning: Proof generated but blockchain submission failed: ${txError.message}\nProof saved locally.`);
-          }
-        }
+        // Step 3: Done! Proof generated OFF-CHAIN
+        console.log('[CredentialsCard] ✅ Proof generation complete');
         
         if (onGenerateProof) {
           onGenerateProof(selectedCredential, proofType);
@@ -574,8 +467,20 @@ export function CredentialsCard({
             {isGenerating ? (
               <div className="text-center py-8">
                 <div className="animate-spin rounded-full h-12 w-12 border-b-4 border-indigo-600 mx-auto mb-4"></div>
-                <p className="text-gray-600">Generating ZK proof with your wallet signature...</p>
-                <p className="text-xs text-gray-400 mt-2">This may take a few seconds</p>
+                <p className="text-gray-600">Generating zero-knowledge proof OFF-CHAIN...</p>
+                <p className="text-xs text-gray-400 mt-2">This may take 2-3 minutes for TRUE zkSNARK generation</p>
+                <div className="mt-4 bg-blue-50 border border-blue-200 rounded-lg p-3">
+                  <p className="text-xs text-blue-800 font-semibold">✨ What's happening:</p>
+                  <p className="text-xs text-blue-700 mt-1">Your proof is being generated entirely in your browser using cryptographic zero-knowledge algorithms. No data is sent to the server or blockchain during generation.</p>
+                </div>
+                {proofProgress > 0 && (
+                  <div className="mt-3">
+                    <div className="w-full bg-gray-200 rounded-full h-2">
+                      <div className="bg-indigo-600 h-2 rounded-full transition-all" style={{width: `${proofProgress}%`}}></div>
+                    </div>
+                    <p className="text-xs text-gray-500 mt-1">{proofProgress}% - {proofStatus}</p>
+                  </div>
+                )}
               </div>
             ) : generatedProof ? (
               <div className="text-center py-4">
@@ -587,7 +492,7 @@ export function CredentialsCard({
                 <div className="bg-gray-50 rounded-lg p-3 mb-4 text-left">
                   <p className="text-xs text-gray-500 mb-1">Proof ID:</p>
                   <p className="text-xs font-mono text-gray-700 break-all">
-                    {generatedProof.metadata?.proofHash || generatedProof.proofType}
+                    {generatedProof.metadata?.proofId || generatedProof.proofType}
                   </p>
                 </div>
                 <div className="flex gap-2">

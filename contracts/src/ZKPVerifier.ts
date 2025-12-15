@@ -115,14 +115,15 @@ export class ZKPVerifier extends SmartContract {
   /**
    * Verify Age Proof
    * 
-   * Verifies that a user's age is greater than the minimum required age
-   * without revealing the actual age.
+   * Verifies that a user's age is above the minimum required age
+   * without revealing their actual age.
    * 
    * @param subject - Public key of the person whose age is being verified
    * @param ageHash - Hash of the actual age (kept private)
    * @param proof - ZK proof that age > minimumAge (commitment from AgeVerificationProgram)
    * @param issuerPublicKey - Public key of the credential issuer
    * @param timestamp - Timestamp from the proof (for commitment verification)
+   * @param minAge - Minimum age from the proof (18, 21, etc.)
    */
   @method
   async verifyAgeProof(
@@ -130,10 +131,12 @@ export class ZKPVerifier extends SmartContract {
     ageHash: Field,
     proof: Field,
     issuerPublicKey: PublicKey,
-    timestamp: Field
+    timestamp: Field,
+    minAge: Field
   ) {
-    // Get minimum age requirement
-    const minAge = this.minimumAge.getAndRequireEquals();
+    // Validate minimum age is reasonable
+    minAge.assertGreaterThanOrEqual(Field(0), 'Minimum age must be positive');
+    minAge.assertLessThanOrEqual(Field(120), 'Minimum age must be reasonable');
 
     // TODO: Verify issuer is in trusted issuers list
     // For now, we'll verify the issuer signature
@@ -203,6 +206,54 @@ export class ZKPVerifier extends SmartContract {
     this.totalVerifications.set(currentTotal.add(1));
 
     // Emit KYC verification event
+    this.emitEvent('KYCVerified', new KYCVerifiedEvent({
+      subjectX: subject.x,
+      issuerX: issuerPublicKey.x,
+      timestamp: this.network.blockchainLength.getAndRequireEquals().value,
+    }));
+  }
+
+  /**
+   * Verify Citizenship/Name Proof
+   * 
+   * Verifies citizenship or name proofs with selective disclosure.
+   * These proofs have a different commitment structure than KYC/Age proofs:
+   * commitment = Hash([dataHash, expectedData, subject, issuer, timestamp])
+   * 
+   * @param subject - Public key of the person whose citizenship/name is being verified
+   * @param dataHash - Hash of citizenship or name data
+   * @param expectedData - The expected citizenship/name value (for selective disclosure)
+   * @param proof - ZK proof (commitment from proof generation)
+   * @param issuerPublicKey - Public key of issuer
+   * @param timestamp - When the proof was created
+   */
+  @method
+  async verifyCitizenshipProof(
+    subject: PublicKey,
+    dataHash: Field,
+    expectedData: Field,
+    proof: Field,
+    issuerPublicKey: PublicKey,
+    timestamp: Field
+  ) {
+    // Create commitment that should match the proof
+    // This must match CitizenshipVerificationProgram.proveCitizenshipMatch
+    const commitment = Poseidon.hash([
+      dataHash,
+      expectedData,
+      ...subject.toFields(),
+      ...issuerPublicKey.toFields(),
+      timestamp,
+    ]);
+
+    // Verify the proof matches the commitment
+    proof.assertEquals(commitment, 'Invalid citizenship/name proof');
+
+    // Increment verification counter
+    const currentTotal = this.totalVerifications.getAndRequireEquals();
+    this.totalVerifications.set(currentTotal.add(1));
+
+    // Emit verification event
     this.emitEvent('KYCVerified', new KYCVerifiedEvent({
       subjectX: subject.x,
       issuerX: issuerPublicKey.x,

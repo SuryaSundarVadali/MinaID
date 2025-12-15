@@ -7,8 +7,13 @@
 'use client';
 
 import React from 'react';
-import { VerifierDashboard } from '../../components/VerifierDashboard';
+import dynamic from 'next/dynamic';
 import { ProtectedRoute } from '../../components/auth/ProtectedRoute';
+
+const VerifierDashboard = dynamic(
+  () => import('../../components/VerifierDashboard').then((mod) => mod.VerifierDashboard),
+  { ssr: false }
+);
 
 export default function VerifierPage() {
   return (

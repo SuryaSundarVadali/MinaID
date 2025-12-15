@@ -1,18 +1,18 @@
 # Contract Deployment & Environment Update Summary
-**Date:** December 8, 2025
+**Date:** December 11, 2025
 
 ## ✅ Completed Tasks
 
 ### 1. Contract Deployment
-- ✅ Added `registerDIDSimple()` method to DIDRegistry contract
-  - Uses `this.sender.getAndRequireSignature()` for authentication
-  - Eliminates the "Invalid signature" error
-  - Simpler interface than the original `registerDID()` method
+- ✅ Deployed to Mina Devnet with optimized configuration
+  - Network: Devnet (not Berkeley)
+  - Fee: 0.1 MINA (100_000_000)
+  - Account creation fees included via `AccountUpdate.fundNewAccount()`
 
-- ✅ Deployed new contracts to Mina Devnet:
+- ✅ Successfully deployed contracts to Mina Devnet:
   ```
-  DIDRegistry:  B62qqfXbZPJAH3RBqbpKeQfUzWKw7JehiyHDhWCFZB8NLctRxoVPrTD
-  ZKPVerifier:  B62qjrwq6t1GbMnS9RqTzr3jJpqAR59jSp2YJnmpmjoGH1BqGRPccjw
+  DIDRegistry:  B62qmv8SmrThvLXaH5zN1eKhPMEEL22coRaeezFM8f4yWNGj6CJ13EH
+  ZKPVerifier:  B62qjxzdqgsRhxMSsUSEYFTdHwqRd7TY9Cu1SLmfECYnaktL1xbW5Sz
   ```
 
 ### 2. Codebase Updates
@@ -21,11 +21,15 @@
   - `ui/lib/BlockchainHelpers.ts`
   - `verify-deployment.js`
   - `ui/.env.local`
+  - `contracts/config.json`
+  - `.env.vercel.local`
 
-- ✅ Added old addresses to `DEPRECATED_ADDRESSES` list:
+- ✅ Added previous addresses to `OLD_CONTRACT_ADDRESSES` list:
   ```
-  B62qkoY7NFfriUPxXYm5TWqJtz4TocpQhmzYq4LK7uXw63v8L8yZQfy (Old DIDRegistry)
-  B62qkRuB4ojsqGmtJaH4eJQqMMdJYfGR2UNKtEUMeJzr1qd3G7rTDLG (Old ZKPVerifier)
+  B62qr6Cbas3oTdwNiBDqFP5S8SD3n8h9BPdhuYPy8b1QigWWpWBkEEM (Old DIDRegistry)
+  B62qjikgRyrBXC7wQPFrct5DFm3bHaFxrDyU2pwc3gJfwi1g1jxx3Xd (Old ZKPVerifier)
+  B62qqfXbZPJAH3RBqbpKeQfUzWKw7JehiyHDhWCFZB8NLctRxoVPrTD (Old DIDRegistry Dec 8)
+  B62qjrwq6t1GbMnS9RqTzr3jJpqAR59jSp2YJnmpmjoGH1BqGRPccjw (Old ZKPVerifier Dec 8)
   ```
 
 ### 3. Documentation
@@ -46,8 +50,8 @@
 **Option A: Via Vercel Dashboard (Recommended)**
 1. Go to: https://vercel.com/suryasundarvadalis-projects/mina-id/settings/environment-variables
 2. Edit these variables for ALL environments:
-   - `NEXT_PUBLIC_DID_REGISTRY_DEVNET` = `B62qqfXbZPJAH3RBqbpKeQfUzWKw7JehiyHDhWCFZB8NLctRxoVPrTD`
-   - `NEXT_PUBLIC_ZKP_VERIFIER_DEVNET` = `B62qjrwq6t1GbMnS9RqTzr3jJpqAR59jSp2YJnmpmjoGH1BqGRPccjw`
+   - `NEXT_PUBLIC_DID_REGISTRY_DEVNET` = `B62qmv8SmrThvLXaH5zN1eKhPMEEL22coRaeezFM8f4yWNGj6CJ13EH`
+   - `NEXT_PUBLIC_ZKP_VERIFIER_DEVNET` = `B62qjxzdqgsRhxMSsUSEYFTdHwqRd7TY9Cu1SLmfECYnaktL1xbW5Sz`
 
 **Option B: Via Vercel CLI**
 ```bash
@@ -60,13 +64,13 @@
 **Option A: Via GitHub Web Interface**
 1. Go to: https://github.com/SuryaSundarVadali/MinaID/settings/secrets/actions
 2. Update these secrets:
-   - `NEXT_PUBLIC_DID_REGISTRY_DEVNET` = `B62qqfXbZPJAH3RBqbpKeQfUzWKw7JehiyHDhWCFZB8NLctRxoVPrTD`
-   - `NEXT_PUBLIC_ZKP_VERIFIER_DEVNET` = `B62qjrwq6t1GbMnS9RqTzr3jJpqAR59jSp2YJnmpmjoGH1BqGRPccjw`
+   - `NEXT_PUBLIC_DID_REGISTRY_DEVNET` = `B62qmv8SmrThvLXaH5zN1eKhPMEEL22coRaeezFM8f4yWNGj6CJ13EH`
+   - `NEXT_PUBLIC_ZKP_VERIFIER_DEVNET` = `B62qjxzdqgsRhxMSsUSEYFTdHwqRd7TY9Cu1SLmfECYnaktL1xbW5Sz`
 
 **Option B: Via GitHub CLI**
 ```bash
-gh secret set NEXT_PUBLIC_DID_REGISTRY_DEVNET --body "B62qqfXbZPJAH3RBqbpKeQfUzWKw7JehiyHDhWCFZB8NLctRxoVPrTD"
-gh secret set NEXT_PUBLIC_ZKP_VERIFIER_DEVNET --body "B62qjrwq6t1GbMnS9RqTzr3jJpqAR59jSp2YJnmpmjoGH1BqGRPccjw"
+gh secret set NEXT_PUBLIC_DID_REGISTRY_DEVNET --body "B62qmv8SmrThvLXaH5zN1eKhPMEEL22coRaeezFM8f4yWNGj6CJ13EH"
+gh secret set NEXT_PUBLIC_ZKP_VERIFIER_DEVNET --body "B62qjxzdqgsRhxMSsUSEYFTdHwqRd7TY9Cu1SLmfECYnaktL1xbW5Sz"
 ```
 
 ### 3. Deploy to Production ⚠️ REQUIRED

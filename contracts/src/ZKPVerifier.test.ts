@@ -119,7 +119,8 @@ describe('ZKPVerifier Contract', () => {
           ageHash,
           proof,
           env.issuer.publicKey,
-          Field(Date.now())
+          Field(Date.now()),
+          Field(18) // minimum age
         );
       });
       
@@ -157,7 +158,8 @@ describe('ZKPVerifier Contract', () => {
             ageHash,
             proof,
             untrustedIssuer,
-            Field(Date.now())
+            Field(Date.now()),
+            Field(18) // minimum age
           );
         });
         await tx.prove();
@@ -416,7 +418,8 @@ describe('ZKPVerifier Contract', () => {
           ageHash,
           proof,
           env.issuer.publicKey,
-          Field(Date.now())
+          Field(Date.now()),
+          Field(18) // minimum age
         );
       });
       

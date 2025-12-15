@@ -28,6 +28,7 @@
     "qrcode": "^1.5.4",
     "react": "^18",
     "react-dom": "^18",
+    "react-hot-toast": "^2.6.0",
     "xml-js": "^1.6.11",
     "xmldsigjs": "^2.8.2"
   },

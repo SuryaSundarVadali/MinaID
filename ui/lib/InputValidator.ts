@@ -149,7 +149,7 @@ export function containsSuspiciousPatterns(input: string): boolean {
   const suspiciousPatterns = [
     /<script/i,
     /javascript:/i,
-    /on\w+\s*=/i,
+    // Removed on\w+= pattern as it triggers false positives with Base64 strings ending in ...onX=
     /<iframe/i,
     /eval\(/i,
     /expression\(/i,

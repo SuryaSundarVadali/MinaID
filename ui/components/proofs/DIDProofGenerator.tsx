@@ -11,12 +11,30 @@ import React, { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { useWallet } from '../../context/WalletContext';
 import { PrivateKey, Field } from 'o1js';
-import { generateAgeProof } from '../../lib/ProofGenerator';
+import {
+  generateAgeProofZK,
+  generateCitizenshipProofZK,
+  generateNameProofZK,
+  compileAgeProgram,
+  compileCitizenshipProgram
+} from '../../lib/ZKProofGenerator';
 import { ProofStorage } from '../../lib/ProofStorage';
 import GradientBG from '../GradientBG';
 
 type StepType = 'welcome' | 'generating' | 'verifying' | 'success' | 'error';
 type ProofType = 'citizenship' | 'age18' | 'age21';
+
+// Helper function to calculate age from date of birth
+function calculateAge(dateOfBirth: string): number {
+  const dob = new Date(dateOfBirth);
+  const today = new Date();
+  let age = today.getFullYear() - dob.getFullYear();
+  const monthDiff = today.getMonth() - dob.getMonth();
+  if (monthDiff < 0 || (monthDiff === 0 && today.getDate() < dob.getDate())) {
+    age--;
+  }
+  return age;
+}
 
 // Helper function to get user-friendly proof type labels
 function getProofTypeLabel(type: ProofType): string {
@@ -289,11 +307,36 @@ export default function DIDProofGenerator({ proofType = 'citizenship' }: DIDProo
 
       const parsedData = JSON.parse(aadharData);
 
-      // Step 3: Generate proof based on type
+      // Step 3: Compile ZK programs (one-time per session)
+      setState(prev => ({ 
+        ...prev, 
+        progress: 50,
+        statusMessage: 'Compiling zero-knowledge circuits...'
+      }));
+      
+      if (proofType === 'citizenship') {
+        await compileCitizenshipProgram((msg, pct) => {
+          setState(prev => ({ 
+            ...prev, 
+            statusMessage: msg,
+            progress: 50 + (pct * 0.1) // 50-60%
+          }));
+        });
+      } else {
+        await compileAgeProgram((msg, pct) => {
+          setState(prev => ({ 
+            ...prev, 
+            statusMessage: msg,
+            progress: 50 + (pct * 0.1) // 50-60%
+          }));
+        });
+      }
+      
+      // Step 4: Generate ZK proof based on type
       setState(prev => ({ 
         ...prev, 
         progress: 60,
-        statusMessage: `Generating ${getProofTypeLabel(proofType)}... This may take a few moments.`
+        statusMessage: `Generating ${getProofTypeLabel(proofType)} (this takes 2-3 minutes)...`
       }));
 
       const minimumAge = getMinimumAge(proofType);
@@ -316,116 +359,137 @@ export default function DIDProofGenerator({ proofType = 'citizenship' }: DIDProo
         issuer: 'UIDAI' as const
       };
 
-      // Generate proof based on type - citizenship uses KYC proof, others use age proof
-      let proof: any;
-      if (proofType === 'citizenship') {
-        // Citizenship proofs use KYC verification (no age requirement)
-        const { generateKYCProof } = await import('../../lib/ProofGenerator');
-        proof = await generateKYCProof(
-          aadharDataObj,
-          privateKey,
-          ['citizenship', 'name']
-        );
-        console.log('[DID Proof Gen] Generated KYC proof for citizenship verification');
-      } else {
-        // Age proofs (age18, age21)
-        proof = await generateAgeProof(
-          aadharDataObj,
-          minimumAge,
-          privateKey
-        );
-        console.log('[DID Proof Gen] Generated age proof with minimumAge:', minimumAge);
-      }
-
-      // Generate selective disclosure commitments for name and citizenship
-      const { generateSelectiveDisclosureProof, generateCitizenshipZKProof } = await import('../../lib/ProofGenerator');
-      
       // Generate a deterministic salt based on DID and timestamp
       const salt = `${session?.did || userIdentifier}_${Date.now()}`;
       
-      const nameProof = generateSelectiveDisclosureProof(
+      // Generate proof based on type - ALL USE TRUE ZK PROOFS (OFF-CHAIN)
+      let zkProofData: any;
+      if (proofType === 'citizenship') {
+        // Get citizenship from parsedData (e.g., "India", "USA", etc.)
+        const citizenship = parsedData.citizenship || parsedData.country || 'India';
+        
+        zkProofData = await generateCitizenshipProofZK(
+          citizenship,
+          privateKey,
+          salt,
+          (msg, pct) => {
+            setState(prev => ({ 
+              ...prev, 
+              statusMessage: msg,
+              progress: 60 + (pct * 0.3) // 60-90%
+            }));
+          }
+        );
+        console.log('[DID Proof Gen] ✅ Generated TRUE zkSNARK citizenship proof (OFF-CHAIN)');
+      } else {
+        // Age proofs (age18, age21) - TRUE ZK PROOFS
+        const actualAge = calculateAge(aadharDataObj.dateOfBirth);
+        
+        zkProofData = await generateAgeProofZK(
+          actualAge,
+          minimumAge,
+          privateKey,
+          salt,
+          (msg, pct) => {
+            setState(prev => ({ 
+              ...prev, 
+              statusMessage: msg,
+              progress: 60 + (pct * 0.3) // 60-90%
+            }));
+          }
+        );
+        console.log('[DID Proof Gen] ✅ Generated TRUE zkSNARK age proof (OFF-CHAIN)');
+      }
+      
+      // Also generate name proof for additional verification
+      const nameZKProof = await generateNameProofZK(
         aadharDataObj.name,
-        'name',
         privateKey,
-        salt
+        salt + '_name',
+        (msg, pct) => {
+          console.log('[Name Proof]', msg, pct);
+        }
       );
-      
-      // Use the new citizenship ZK proof (case-insensitive)
-      const citizenshipProof = generateCitizenshipZKProof(
-        aadharDataObj.address?.country || 'India',
-        privateKey,
-        salt
-      );
-      
-      console.log('[DID Proof Gen] Citizenship proof generated:', {
-        original: aadharDataObj.address?.country,
-        normalized: citizenshipProof.normalizedValue,
-        commitment: citizenshipProof.commitment
-      });
+      console.log('[DID Proof Gen] ✅ Generated name zkSNARK proof (OFF-CHAIN)');
 
-      // Step 4: Store the proof
+      const proofId = `minaid-${proofType}-${Date.now()}`;
+
+      // Step 5: Store proofs locally
       setState(prev => ({ 
         ...prev, 
-        progress: 80,
-        statusMessage: 'Storing your proof...'
+        progress: 92,
+        statusMessage: 'Saving proofs...'
       }));
-
-      const proofId = ProofStorage.saveProof({
-        type: proofType === 'citizenship' ? 'kyc' : 'age',
-        status: 'pending',
-        proofData: JSON.stringify({
-          proof: proof.proof,
-          publicOutput: proof.publicOutput,
-          selectiveDisclosure: {
-            name: nameProof,
-            citizenship: citizenshipProof,
-            salt, // Store salt for verification
-          }
-        }),
+      
+      // Map ProofType to StoredProof type
+      const storedProofType = proofType === 'citizenship' ? 'kyc' as const : 'age' as const;
+      
+      // Store the main proof
+      ProofStorage.saveProof({
+        type: storedProofType,
         did: session?.did || userIdentifier,
+        status: 'pending',
         metadata: {
-          proofType,
-          minimumAge: minimumAge > 0 ? minimumAge : undefined
-        }
+          proofType: proofType,
+          minimumAge: minimumAge > 0 ? minimumAge : undefined,
+        },
+        proofData: JSON.stringify(zkProofData)
       });
 
-      // Prepare downloadable proof data
-      const downloadableProof = {
-        proof: proof.proof,
-        publicOutput: proof.publicOutput,
-        selectiveDisclosure: {
-          name: nameProof,
-          citizenship: citizenshipProof,
-          salt,
+      // Store name proof separately
+      ProofStorage.saveProof({
+        type: 'kyc',
+        did: session?.did || userIdentifier,
+        status: 'pending',
+        metadata: {
+          proofType: 'name',
         },
+        proofData: JSON.stringify(nameZKProof)
+      });
+
+      // Create downloadable proof package
+      const downloadableProof = {
+        proof: zkProofData.proof,
+        publicOutput: zkProofData.publicOutput,
         did: session?.did || userIdentifier,
         proofType,
         minimumAge: minimumAge > 0 ? minimumAge : undefined,
-        timestamp: proof.timestamp  // Use the SAME timestamp that was used in commitment computation
+        timestamp: zkProofData.timestamp,
+        selectiveDisclosure: zkProofData.selectiveDisclosure
       };
 
-      // Step 5: Record proof on blockchain (non-blocking)
+      // Step 6: Record proof on blockchain (optional, non-blocking)
       setState(prev => ({ 
         ...prev, 
-        progress: 90,
+        progress: 95,
         statusMessage: 'Recording proof on blockchain...'
       }));
 
       // Attempt blockchain recording (don't fail if it doesn't work)
       try {
-        const { recordProofOnChain } = await import('../../lib/BlockchainHelpers');
-        const txHash = await recordProofOnChain(
-          session?.did || userIdentifier,
-          proofType,
-          proof,
+        // Import ContractInterface to verify proof on-chain
+        const { ContractInterface } = await import('../../lib/ContractInterface');
+        const contract = new ContractInterface({
+          minaEndpoint: 'https://proxy.devnet.minaexplorer.com/graphql',
+          archiveEndpoint: 'https://archive.devnet.minaexplorer.com',
+          networkId: 'devnet',
+          didRegistryAddress: process.env.NEXT_PUBLIC_DID_REGISTRY_ADDRESS || '',
+          zkpVerifierAddress: process.env.NEXT_PUBLIC_ZKP_VERIFIER_ADDRESS || ''
+        });
+        await contract.initialize();
+        
+        // Verify the ZK proof on-chain (only verification, proof was generated off-chain)
+        const result = await contract.verifyZKProofOnChain(
+          zkProofData,
           privateKey.toBase58()
         );
-        if (txHash) {
-          console.log('[DIDProofGenerator] Proof recorded on blockchain:', txHash);
-          localStorage.setItem(`minaid_proof_tx_${proofId}`, txHash);
+        
+        if (result.success && result.hash) {
+          console.log('[DIDProofGenerator] ✅ Proof VERIFIED ON-CHAIN:', result.hash);
+          localStorage.setItem(`minaid_proof_tx_${proofId}`, result.hash);
         }
       } catch (blockchainError: any) {
-        console.warn('[DIDProofGenerator] Blockchain recording failed (non-blocking):', blockchainError.message);
+        console.warn('[DIDProofGenerator] ⚠️ On-chain verification failed (non-blocking):', blockchainError.message);
       }
 
       // Success

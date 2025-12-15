@@ -63,9 +63,9 @@ Two primary contracts handle on-chain operations:
 - Maintains trusted issuer registry
 - Configurable minimum age thresholds
 
-All contracts are deployed on Mina Devnet:
-- DIDRegistry: `B62qqfXbZPJAH3RBqbpKeQfUzWKw7JehiyHDhWCFZB8NLctRxoVPrTD`
-- ZKPVerifier: `B62qjrwq6t1GbMnS9RqTzr3jJpqAR59jSp2YJnmpmjoGH1BqGRPccjw`
+All contracts are deployed on **Zeko Testnet** (L2 zkRollup on Mina Protocol):
+- DIDRegistry: `B62qjbYMtue63MZjDxptNQbS1DceNUNCoSwuuadg1NNcdn1YTg9Fnrj`
+- ZKPVerifier: `B62qmc9mvmg29EwS3wXw3UvSvoBGp9b4WaeHgv3c3ZJXWZaYSZTpRj6`
 
 ### Communication Layer
 **WebSocket Service** (Optional)
@@ -426,8 +426,8 @@ npm run generate-cache
 # Copy cache to UI for browser access
 npm run copy-cache
 
-# Deploy to devnet
-npm run deploy devnet
+# Deploy to Zeko Testnet
+npm run deploy
 
 # Deploy to Berkeley testnet
 npm run deploy berkeley
@@ -500,11 +500,11 @@ Create `.env.local` in the `ui` directory:
 
 ```bash
 # Network Configuration
-NEXT_PUBLIC_NETWORK=devnet
+NEXT_PUBLIC_NETWORK=zeko-testnet
 
-# Smart Contract Addresses (Devnet)
-NEXT_PUBLIC_DID_REGISTRY_DEVNET=B62qqfXbZPJAH3RBqbpKeQfUzWKw7JehiyHDhWCFZB8NLctRxoVPrTD
-NEXT_PUBLIC_ZKP_VERIFIER_DEVNET=B62qjrwq6t1GbMnS9RqTzr3jJpqAR59jSp2YJnmpmjoGH1BqGRPccjw
+# Smart Contract Addresses (Zeko Testnet)
+NEXT_PUBLIC_DID_REGISTRY_ZEKO_TESTNET=B62qjbYMtue63MZjDxptNQbS1DceNUNCoSwuuadg1NNcdn1YTg9Fnrj
+NEXT_PUBLIC_ZKP_VERIFIER_ZEKO_TESTNET=B62qmc9mvmg29EwS3wXw3UvSvoBGp9b4WaeHgv3c3ZJXWZaYSZTpRj6
 
 # WebSocket Server (optional)
 NEXT_PUBLIC_WS_URL=ws://localhost:8080/minaid
@@ -899,14 +899,14 @@ SecurityLogger.log('PROOF_GENERATED', {
 
 - **Local Storage**: Private keys stored in browser localStorage encrypted with passkey-derived keys. Users should not clear browser data without backing up keys.
 - **Client-Side Trust**: Proof generation happens client-side, trusting the user's browser environment. Compromised browsers could expose private keys.
-- **Devnet Deployment**: Current contracts deployed on Devnet for testing. Mainnet deployment requires security audit.
+- **Zeko Testnet Deployment**: Current contracts deployed on Zeko Testnet (L2 on Mina) for testing. Mainnet deployment requires security audit.
 - **Single Device**: Passkeys are device-specific. Account recovery across devices requires additional implementation.
 
 ## Deployment
 
 ### Smart Contract Deployment
 
-Deploy contracts to Mina Devnet or Berkeley testnet:
+Deploy contracts to Zeko Testnet or other Mina-compatible networks:
 
 ```bash
 cd contracts
@@ -915,8 +915,8 @@ cd contracts
 npm run generate-cache
 npm run copy-cache
 
-# Deploy to Devnet
-npm run deploy devnet
+# Deploy to Zeko Testnet
+npm run deploy
 
 # Deploy to Berkeley testnet
 npm run deploy berkeley
@@ -954,9 +954,9 @@ vercel --prod
 
 3. Configure environment variables in Vercel dashboard:
 ```
-NEXT_PUBLIC_NETWORK=devnet
-NEXT_PUBLIC_DID_REGISTRY_DEVNET=B62qqfXbZPJAH3RBqbpKeQfUzWKw7JehiyHDhWCFZB8NLctRxoVPrTD
-NEXT_PUBLIC_ZKP_VERIFIER_DEVNET=B62qjrwq6t1GbMnS9RqTzr3jJpqAR59jSp2YJnmpmjoGH1BqGRPccjw
+NEXT_PUBLIC_NETWORK=zeko-testnet
+NEXT_PUBLIC_DID_REGISTRY_ZEKO_TESTNET=B62qjbYMtue63MZjDxptNQbS1DceNUNCoSwuuadg1NNcdn1YTg9Fnrj
+NEXT_PUBLIC_ZKP_VERIFIER_ZEKO_TESTNET=B62qmc9mvmg29EwS3wXw3UvSvoBGp9b4WaeHgv3c3ZJXWZaYSZTpRj6
 ```
 
 **Alternative: Self-Hosted**
@@ -1024,9 +1024,9 @@ NEXT_PUBLIC_DEBUG=false
 
 **Development (.env.local)**
 ```bash
-NEXT_PUBLIC_NETWORK=devnet
-NEXT_PUBLIC_DID_REGISTRY_DEVNET=B62qqfXbZPJAH3RBqbpKeQfUzWKw7JehiyHDhWCFZB8NLctRxoVPrTD
-NEXT_PUBLIC_ZKP_VERIFIER_DEVNET=B62qjrwq6t1GbMnS9RqTzr3jJpqAR59jSp2YJnmpmjoGH1BqGRPccjw
+NEXT_PUBLIC_NETWORK=zeko-testnet
+NEXT_PUBLIC_DID_REGISTRY_ZEKO_TESTNET=B62qjbYMtue63MZjDxptNQbS1DceNUNCoSwuuadg1NNcdn1YTg9Fnrj
+NEXT_PUBLIC_ZKP_VERIFIER_ZEKO_TESTNET=B62qmc9mvmg29EwS3wXw3UvSvoBGp9b4WaeHgv3c3ZJXWZaYSZTpRj6
 NEXT_PUBLIC_WS_URL=ws://localhost:8080/minaid
 NEXT_PUBLIC_DEBUG=true
 ```

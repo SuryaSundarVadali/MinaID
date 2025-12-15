@@ -44,7 +44,11 @@ export interface CacheStats {
 export class MerkleCache {
   private manifest: CacheManifest | null = null;
   private readonly CHUNK_SIZE = 1024 * 1024; // 1MB chunks (must match build script)
-  private readonly MAX_STORAGE_MB = 800; // Leave room for quota overhead
+  
+  // Note: We only store small files (lagrange-basis, srs, step-vk, wrap-vk) in IndexedDB
+  // Proving keys (step-pk-*, wrap-pk-*) are kept in memory only to avoid quota issues
+  // Total small files: ~24MB, so 100MB limit provides plenty of headroom
+  private readonly MAX_STORAGE_MB = 100; 
   private readonly LRU_EVICTION_PERCENT = 0.15; // Evict 15% when over quota
 
   async initialize(): Promise<void> {

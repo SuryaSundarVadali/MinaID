@@ -11,8 +11,11 @@ export interface GeneratedProof {
   proof: string;
   publicInput: {
     subjectPublicKey: string;
-    minimumAge: string;
-    ageHash: string;
+    minimumAge?: string;
+    ageHash?: string;
+    kycHash?: string;
+    citizenshipHash?: string;
+    nameHash?: string;
     issuerPublicKey: string;
     timestamp: number;
   };
@@ -47,8 +50,9 @@ let isGenerating = false;
 // Cache TTL: 24 hours
 const CACHE_TTL = 24 * 60 * 60 * 1000;
 
-// Version for cache invalidation
-const CLIENT_VERSION = '2.0.0';
+// Version for cache invalidation - UPDATE THIS when commitment calculation changes!
+// v2.1.0: Fixed minimumAge parameter to use actual value instead of hardcoded 18
+const CLIENT_VERSION = '2.1.0'; // Changed from 2.0.0 to invalidate old cached proofs
 
 /**
  * Generate a deterministic hash from inputs for caching
@@ -69,6 +73,13 @@ function hashInputs(inputs: Record<string, any>): string {
 function getCachedProof(inputsHash: string): GeneratedProof | null {
   const cached = proofCache.get(inputsHash);
   if (!cached) return null;
+  
+  // Check version - invalidate if client version changed
+  if (cached.proof.metadata.clientVersion !== CLIENT_VERSION) {
+    console.log(`[SmartProofGenerator] Cache invalidated - version mismatch (cached: ${cached.proof.metadata.clientVersion}, current: ${CLIENT_VERSION})`);
+    proofCache.delete(inputsHash);
+    return null;
+  }
   
   const age = Date.now() - cached.createdAt;
   if (age > CACHE_TTL) {
@@ -155,8 +166,9 @@ export async function generateAgeProofSmart(
     
     onProgress?.('Creating proof signature...', 50);
     
-    // Create timestamp
-    const timestamp = Math.floor(Date.now() / 1000);
+    // Create timestamp in SECONDS (for blockchain)
+    const timestampSeconds = Math.floor(Date.now() / 1000);
+    const timestampMs = Date.now(); // For UI display
     
     // Contract expects: Poseidon.hash([ageHash, minAge, subject, issuer, timestamp])
     const commitment = Poseidon.hash([
@@ -164,7 +176,7 @@ export async function generateAgeProofSmart(
       Field(minAge),
       ...publicKey.toFields(),
       ...publicKey.toFields(), // self-attested (issuer = subject)
-      Field(timestamp),
+      Field(timestampSeconds),
     ]);
     
     onProgress?.('Signing commitment...', 70);
@@ -189,12 +201,12 @@ export async function generateAgeProofSmart(
         minimumAge: minAge.toString(),
         ageHash: ageHash.toString(),
         issuerPublicKey: publicKey.toBase58(),
-        timestamp,
+        timestamp: timestampSeconds, // IMPORTANT: This is in seconds for blockchain
       },
       publicOutput: commitment.toString(),
       proofType: minAge === 18 ? 'age18' : minAge === 21 ? 'age21' : `age${minAge}`,
       did: `did:mina:${publicKey.toBase58()}`,
-      timestamp: Date.now(),
+      timestamp: timestampMs, // UI display timestamp in milliseconds
       metadata: {
         verificationKeyHash: 'client-side-v2', // Will be updated when on-chain
         proofHash: commitment.toString().slice(0, 16),
@@ -256,7 +268,9 @@ export async function generateKYCProofSmart(
     // Create KYC hash from Aadhar data
     const uidField = Field.from(BigInt('0x' + Buffer.from(aadharData.uid).toString('hex').slice(0, 16)));
     const nameField = Field.from(BigInt('0x' + Buffer.from(aadharData.name).toString('hex').slice(0, 16)));
-    const timestamp = Field(Math.floor(Date.now() / 1000));
+    const timestampSeconds = Math.floor(Date.now() / 1000);
+    const timestampMs = Date.now();
+    const timestamp = Field(timestampSeconds);
     
     const kycHash = Poseidon.hash([uidField, nameField, timestamp]);
     
@@ -288,12 +302,12 @@ export async function generateKYCProofSmart(
         minimumAge: '0',
         ageHash: kycHash.toString(),
         issuerPublicKey: publicKey.toBase58(),
-        timestamp: Number(timestamp.toString()),
+        timestamp: timestampSeconds, // IMPORTANT: This is in seconds for blockchain
       },
       publicOutput: commitment.toString(),
       proofType: 'kyc',
       did: `did:mina:${publicKey.toBase58()}`,
-      timestamp: Date.now(),
+      timestamp: timestampMs, // UI display timestamp in milliseconds
       metadata: {
         verificationKeyHash: 'client-side-v2',
         proofHash: commitment.toString().slice(0, 16),
@@ -315,11 +329,26 @@ export async function generateKYCProofSmart(
 }
 
 /**
- * Clear proof cache
+ * Clear proof cache (SESSION ONLY - no localStorage persistence)
  */
 export function clearProofCache(): void {
   proofCache.clear();
-  console.log('[SmartProofGenerator] Cache cleared');
+  console.log('[SmartProofGenerator] ✅ Session cache cleared (memory only)');
+}
+
+/**
+ * Clear cache for a specific user (SESSION ONLY)
+ */
+export function clearUserProofCache(userIdentifier: string): void {
+  // Filter and delete matching entries from memory cache
+  const keysToDelete: string[] = [];
+  proofCache.forEach((_, key) => {
+    if (key.includes(userIdentifier)) {
+      keysToDelete.push(key);
+    }
+  });
+  keysToDelete.forEach(key => proofCache.delete(key));
+  console.log(`[SmartProofGenerator] ✅ Cleared ${keysToDelete.length} proofs for user`);
 }
 
 /**

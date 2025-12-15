@@ -59,13 +59,13 @@ export function resetMerkleMapState(): void {
   console.log('[BlockchainHelpers] MerkleMap state reset');
 }
 
-// Network configuration
+// Network configuration - Devnet
 const NETWORK_CONFIG = {
   networkId: 'devnet' as const,
   minaEndpoint: 'https://api.minascan.io/node/devnet/v1/graphql',
   archiveEndpoint: 'https://api.minascan.io/archive/devnet/v1/graphql',
-  didRegistryAddress: process.env.NEXT_PUBLIC_DID_REGISTRY_DEVNET || 'B62qqfXbZPJAH3RBqbpKeQfUzWKw7JehiyHDhWCFZB8NLctRxoVPrTD',
-  zkpVerifierAddress: process.env.NEXT_PUBLIC_ZKP_VERIFIER_DEVNET || 'B62qjrwq6t1GbMnS9RqTzr3jJpqAR59jSp2YJnmpmjoGH1BqGRPccjw',
+  didRegistryAddress: process.env.NEXT_PUBLIC_DID_REGISTRY_DEVNET || 'B62qmv8SmrThvLXaH5zN1eKhPMEEL22coRaeezFM8f4yWNGj6CJ13EH',
+  zkpVerifierAddress: process.env.NEXT_PUBLIC_ZKP_VERIFIER_DEVNET || 'B62qjxzdqgsRhxMSsUSEYFTdHwqRd7TY9Cu1SLmfECYnaktL1xbW5Sz',
 };
 
 // Singleton instance

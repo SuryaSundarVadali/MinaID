@@ -3,10 +3,13 @@
  * 
  * Monitors transaction status with GraphQL polling.
  * Handles "in progress" state properly and provides confirmation tracking.
+ * Integrates with toast notifications for user feedback.
  */
 
+import { notify } from './ToastNotifications';
+
 // Network configuration
-const GRAPHQL_ENDPOINT = 'https://api.minascan.io/node/devnet/v1/graphql';
+const GRAPHQL_ENDPOINT = 'https://api.minascan.io/archive/devnet/v1/graphql';
 
 // Monitoring configuration
 const POLL_INTERVAL_MS = 3000; // 3 seconds
@@ -38,26 +41,43 @@ export interface MonitoringCallbacks {
   onProgress?: (elapsed: number, maxWait: number) => void;
   onConfirmed?: (result: MonitoringResult) => void;
   onFailed?: (reason: string) => void;
+  showToasts?: boolean; // Enable/disable toast notifications
 }
 
+import { checkBlockberryTransaction } from './BlockberryMonitor';
+
 /**
- * Query transaction status from GraphQL
+ * Query transaction status using Blockberry API with GraphQL fallback
  */
 async function queryTransactionStatus(
   txHash: string
 ): Promise<{ status: TxStatus; blockHeight?: number; failureReason?: string }> {
   try {
+    // Primary: Try Blockberry API
+
+    const NEXT_PUBLIC_BLOCKBERRY_API_KEY='lTArAoBso7ZH6eH4dhCRFFa5runKoS';
+    const blockberryKey = NEXT_PUBLIC_BLOCKBERRY_API_KEY;
+    if (blockberryKey) {
+      const bbResult = await checkBlockberryTransaction(txHash, blockberryKey);
+      if (bbResult.included) {
+        return { status: 'included', blockHeight: bbResult.data?.blockHeight || 0 };
+      }
+      if (bbResult.failed) {
+        return { status: 'failed', failureReason: bbResult.error };
+      }
+    }
+
+    // Fallback: Use GraphQL to check if transaction is included in a block
     const response = await fetch(GRAPHQL_ENDPOINT, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         query: `
           query GetTransaction($hash: String!) {
-            transaction(query: { hash: $hash }) {
+            transactions(query: {hash: $hash, canonical: true}, limit: 1) {
               hash
               blockHeight
               failureReason
-              status: memo
             }
           }
         `,
@@ -72,26 +92,24 @@ async function queryTransactionStatus(
       return { status: 'unknown' };
     }
     
-    const tx = result.data?.transaction;
+    const transactions = result.data?.transactions || [];
     
-    if (!tx) {
-      // Transaction not found yet - still in mempool
-      return { status: 'pending' };
-    }
-    
-    if (tx.failureReason) {
-      // Check for "in progress" failure
-      if (tx.failureReason.toLowerCase().includes('in progress')) {
-        return { status: 'in_progress' };
+    // If transaction is found in a block, it's included
+    if (transactions.length > 0) {
+      const tx = transactions[0];
+      if (tx.failureReason) {
+        const reason = Array.isArray(tx.failureReason) 
+          ? tx.failureReason.join(', ') 
+          : String(tx.failureReason);
+        return { status: 'failed', failureReason: reason };
       }
-      return { status: 'failed', failureReason: tx.failureReason };
+      return { status: 'included', blockHeight: tx.blockHeight || 0 };
     }
     
-    if (tx.blockHeight) {
-      return { status: 'included', blockHeight: tx.blockHeight };
-    }
-    
-    return { status: 'in_mempool' };
+    // Not found in blocks yet - could be pending or in mempool
+    // Since we can't easily query mempool status via Minascan GraphQL,
+    // we'll return pending status
+    return { status: 'pending' };
     
   } catch (error) {
     console.log('[TransactionMonitor] Query error:', error);
@@ -110,12 +128,8 @@ async function queryLatestBlockHeight(): Promise<number | null> {
       body: JSON.stringify({
         query: `
           query {
-            bestChain(maxLength: 1) {
-              protocolState {
-                consensusState {
-                  blockHeight
-                }
-              }
+            blocks(query: {canonical: true}, sortBy: BLOCKHEIGHT_DESC, limit: 1) {
+              blockHeight
             }
           }
         `,
@@ -123,7 +137,7 @@ async function queryLatestBlockHeight(): Promise<number | null> {
     });
     
     const result = await response.json();
-    return result.data?.bestChain?.[0]?.protocolState?.consensusState?.blockHeight || null;
+    return result.data?.blocks?.[0]?.blockHeight || null;
     
   } catch (error) {
     return null;
@@ -147,6 +161,7 @@ export async function monitorTransaction(
 ): Promise<MonitoringResult> {
   const maxWait = options?.maxWaitTime || MAX_WAIT_TIME_MS;
   const requiredConfirmations = options?.requiredConfirmations || 1;
+  const showToasts = callbacks?.showToasts !== false; // Default to true
   
   const startTime = Date.now();
   let currentStatus: TxStatus = 'pending';
@@ -154,9 +169,15 @@ export async function monitorTransaction(
   let inProgressCount = 0;
   let extraWaitAdded = false;
   let effectiveMaxWait = maxWait;
+  let toastId: string | undefined;
   
   console.log(`[TransactionMonitor] Monitoring transaction: ${txHash}`);
   callbacks?.onStatusChange?.('pending', 'Starting transaction monitoring...');
+  
+  // Show initial toast
+  if (showToasts) {
+    toastId = notify.tx.pending('Monitoring transaction...');
+  }
   
   while (true) {
     const elapsed = Date.now() - startTime;
@@ -165,6 +186,11 @@ export async function monitorTransaction(
     if (elapsed >= effectiveMaxWait) {
       console.log(`[TransactionMonitor] ⏱️ Timeout after ${Math.round(elapsed / 1000)}s`);
       callbacks?.onFailed?.('Transaction monitoring timeout');
+      
+      if (showToasts) {
+        notify.dismiss(toastId);
+        notify.warning('Transaction monitoring timeout - it may still be processing');
+      }
       
       return {
         status: 'timeout',
@@ -216,6 +242,11 @@ export async function monitorTransaction(
           console.log(`[TransactionMonitor] ❌ Transaction failed: ${statusResult.failureReason}`);
           callbacks?.onFailed?.(statusResult.failureReason || 'Unknown failure');
           
+          if (showToasts) {
+            notify.dismiss(toastId);
+            notify.tx.failed(statusResult.failureReason || 'Unknown failure');
+          }
+          
           return {
             status: 'failed',
             transactionHash: txHash,
@@ -243,6 +274,11 @@ export async function monitorTransaction(
             confirmations,
             totalWaitTime: Date.now() - startTime,
           });
+          
+          if (showToasts) {
+            notify.dismiss(toastId);
+            notify.tx.confirmed(txHash, confirmations);
+          }
           
           return {
             status: 'confirmed',

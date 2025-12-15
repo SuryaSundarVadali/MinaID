@@ -5,17 +5,17 @@
  */
 
 const CORRECT_ADDRESSES = {
-  didRegistry: 'B62qqfXbZPJAH3RBqbpKeQfUzWKw7JehiyHDhWCFZB8NLctRxoVPrTD',
-  zkpVerifier: 'B62qjrwq6t1GbMnS9RqTzr3jJpqAR59jSp2YJnmpmjoGH1BqGRPccjw',
+  didRegistry: 'B62qmv8SmrThvLXaH5zN1eKhPMEEL22coRaeezFM8f4yWNGj6CJ13EH',
+  zkpVerifier: 'B62qjxzdqgsRhxMSsUSEYFTdHwqRd7TY9Cu1SLmfECYnaktL1xbW5Sz',
 };
 
 const OLD_ADDRESSES = {
-  didRegistry: 'B62qkoY7NFfriUPxXYm5TWqJtz4TocpQhmzYq4LK7uXw63v8L8yZQfy',
-  zkpVerifier: 'B62qkRuB4ojsqGmtJaH4eJQqMMdJYfGR2UNKtEUMeJzr1qd3G7rTDLG',
+  didRegistry: 'B62qmZgdBMV3pNLfK1Z9jQsZyoYgY6aWKwFWJHAnfk3QTbn883QLUg8',
+  zkpVerifier: 'B62qnGLZeJw9nSH9FTyCzyrcs2BK8w7tZEGvH2uyLU2YzKNeG4Xo6ri',
 };
 
 console.log('🔍 Verifying Contract Addresses Deployment\n');
-console.log('✅ Correct Addresses (Dec 7, 2025):');
+console.log('✅ Correct Addresses (Dec 11, 2025):');
 console.log(`   DIDRegistry: ${CORRECT_ADDRESSES.didRegistry}`);
 console.log(`   ZKPVerifier: ${CORRECT_ADDRESSES.zkpVerifier}\n`);
 

@@ -27,6 +27,9 @@ export interface StoredProof {
   
   // User context
   did: string;
+  
+  // Transaction info
+  txHash?: string;
 }
 
 const STORAGE_KEY = 'minaid_proofs';
