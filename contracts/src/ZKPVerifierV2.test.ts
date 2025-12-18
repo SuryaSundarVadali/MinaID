@@ -15,6 +15,7 @@ import {
   PrivateKey, 
   AccountUpdate,
   MerkleMap,
+  Poseidon,
 } from 'o1js';
 import { ZKPVerifierV2 } from './ZKPVerifierV2.js';
 import { AgeVerificationProgram } from './AgeVerificationProgram.js';
@@ -98,9 +99,9 @@ describe('ZKPVerifierV2 - Merkle Tree Implementation', () => {
       
       // Generate witness for empty slot (issuer not yet added)
       const issuer1Key = issuer1;
-      const witness = merkleMap.getWitness(
-        Field.from(BigInt('0x' + issuer1Key.toFields()[0].toBigInt().toString(16)))
-      );
+      // Use same key generation as contract: Poseidon.hash(issuer.toFields())
+      const mapKey = Poseidon.hash(issuer1Key.toFields());
+      const witness = merkleMap.getWitness(mapKey);
       
       // Add issuer
       const addTx = await Mina.transaction(deployer, async () => {
@@ -113,10 +114,7 @@ describe('ZKPVerifierV2 - Merkle Tree Implementation', () => {
       log.success('Issuer1 added successfully');
       
       // Update local Merkle map
-      merkleMap.set(
-        Field.from(BigInt('0x' + issuer1Key.toFields()[0].toBigInt().toString(16))),
-        Field(1)
-      );
+      merkleMap.set(mapKey, Field(1));
       
       // Verify root was updated
       const newRoot = zkpVerifier.trustedIssuersRoot.get();
@@ -135,9 +133,8 @@ describe('ZKPVerifierV2 - Merkle Tree Implementation', () => {
       log.test('Adding issuer2 to trusted list');
       
       const issuer2Key = issuer2;
-      const witness = merkleMap.getWitness(
-        Field.from(BigInt('0x' + issuer2Key.toFields()[0].toBigInt().toString(16)))
-      );
+      const mapKey = Poseidon.hash(issuer2Key.toFields());
+      const witness = merkleMap.getWitness(mapKey);
       
       const addTx = await Mina.transaction(deployer, async () => {
         await zkpVerifier.addTrustedIssuer(issuer2Key, witness);
@@ -149,10 +146,7 @@ describe('ZKPVerifierV2 - Merkle Tree Implementation', () => {
       log.success('Issuer2 added successfully');
       
       // Update local Merkle map
-      merkleMap.set(
-        Field.from(BigInt('0x' + issuer2Key.toFields()[0].toBigInt().toString(16))),
-        Field(1)
-      );
+      merkleMap.set(mapKey, Field(1));
       
       // Verify root matches
       const newRoot = zkpVerifier.trustedIssuersRoot.get();
@@ -169,9 +163,8 @@ describe('ZKPVerifierV2 - Merkle Tree Implementation', () => {
       log.test('Non-owner attempting to add issuer');
       
       const newIssuer = PrivateKey.random().toPublicKey();
-      const witness = merkleMap.getWitness(
-        Field.from(BigInt('0x' + newIssuer.toFields()[0].toBigInt().toString(16)))
-      );
+      const mapKey = Poseidon.hash(newIssuer.toFields());
+      const witness = merkleMap.getWitness(mapKey);
       
       await assert.throws(async () => {
         const tx = await Mina.transaction(issuer1, async () => {
@@ -190,9 +183,8 @@ describe('ZKPVerifierV2 - Merkle Tree Implementation', () => {
       log.test('Verifying issuer1 is in trusted list');
       
       const issuer1Key = issuer1;
-      const witness = merkleMap.getWitness(
-        Field.from(BigInt('0x' + issuer1Key.toFields()[0].toBigInt().toString(16)))
-      );
+      const mapKey = Poseidon.hash(issuer1Key.toFields());
+      const witness = merkleMap.getWitness(mapKey);
       
       const verifyTx = await Mina.transaction(deployer, async () => {
         await zkpVerifier.verifyTrustedIssuer(issuer1Key, witness);
@@ -208,9 +200,8 @@ describe('ZKPVerifierV2 - Merkle Tree Implementation', () => {
       log.test('Verifying issuer2 is in trusted list');
       
       const issuer2Key = issuer2;
-      const witness = merkleMap.getWitness(
-        Field.from(BigInt('0x' + issuer2Key.toFields()[0].toBigInt().toString(16)))
-      );
+      const mapKey = Poseidon.hash(issuer2Key.toFields());
+      const witness = merkleMap.getWitness(mapKey);
       
       const verifyTx = await Mina.transaction(deployer, async () => {
         await zkpVerifier.verifyTrustedIssuer(issuer2Key, witness);
@@ -226,9 +217,8 @@ describe('ZKPVerifierV2 - Merkle Tree Implementation', () => {
       log.test('Attempting to verify untrusted issuer');
       
       const untrustedIssuer = PrivateKey.random().toPublicKey();
-      const witness = merkleMap.getWitness(
-        Field.from(BigInt('0x' + untrustedIssuer.toFields()[0].toBigInt().toString(16)))
-      );
+      const mapKey = Poseidon.hash(untrustedIssuer.toFields());
+      const witness = merkleMap.getWitness(mapKey);
       
       await assert.throws(async () => {
         const tx = await Mina.transaction(deployer, async () => {

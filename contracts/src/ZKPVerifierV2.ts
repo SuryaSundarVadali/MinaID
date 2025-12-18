@@ -252,7 +252,7 @@ export class ZKPVerifierV2 extends SmartContract {
     const currentRoot = this.trustedIssuersRoot.getAndRequireEquals();
 
     // Generate key from issuer's public key for Merkle Map
-    const key = Poseidon.hash(issuer.toFields());
+    const key = this.getIssuerKey(issuer);
 
     // Verify the witness is valid for current root with value 0 (empty slot)
     // This proves that the issuer is not already in the trusted list
@@ -286,12 +286,23 @@ export class ZKPVerifierV2 extends SmartContract {
     const currentRoot = this.trustedIssuersRoot.getAndRequireEquals();
 
     // Generate key from issuer's public key for Merkle Map
-    const key = Poseidon.hash(issuer.toFields());
+    const key = this.getIssuerKey(issuer);
 
     // Verify the witness proves the issuer is trusted (value = 1)
     const [witnessRoot, witnessKey] = witness.computeRootAndKey(Field(1));
     currentRoot.assertEquals(witnessRoot, 'Invalid Merkle witness or issuer not trusted');
     key.assertEquals(witnessKey, 'Key mismatch in witness');
+  }
+
+  /**
+   * Helper method to generate Merkle Map key from issuer public key
+   * Ensures consistent key generation across all methods
+   * 
+   * @param issuer - Public key of the issuer
+   * @returns Field representing the key in the Merkle Map
+   */
+  private getIssuerKey(issuer: PublicKey): Field {
+    return Poseidon.hash(issuer.toFields());
   }
 
   /**
