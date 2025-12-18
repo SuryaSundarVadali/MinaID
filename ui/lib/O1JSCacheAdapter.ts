@@ -112,19 +112,37 @@ export async function createO1JSCacheFromMerkle(merkleCache: MerkleCache): Promi
     throw new Error('Manifest not loaded');
   }
 
-  // Get cache URL from environment or default to localhost
-  // If NEXT_PUBLIC_CACHE_URL is set (e.g., GitHub Releases), use it directly
-  // Otherwise, use local API route
-  const externalCacheUrl = process.env.NEXT_PUBLIC_CACHE_URL;
-  const useExternalCache = externalCacheUrl && typeof window !== 'undefined';
+  // Get cache URL from environment or use GitHub Releases as fallback
+  // Priority: 1. NEXT_PUBLIC_CACHE_URL env var, 2. GitHub Releases (production), 3. Local API (development)
+  const envCacheUrl = process.env.NEXT_PUBLIC_CACHE_URL;
+  const isProduction = typeof window !== 'undefined' && !window.location.hostname.includes('localhost');
   
-  const CACHE_BASE_URL = useExternalCache 
-    ? externalCacheUrl 
-    : (typeof window !== 'undefined' ? `${window.location.origin}/api/cache` : 'http://localhost:3000/api/cache');
+  // Default GitHub Releases URL for production
+  const GITHUB_CACHE_URL = 'https://github.com/SuryaSundarVadali/MinaID/releases/download/v1.0.0-cache';
+  
+  let CACHE_BASE_URL: string;
+  let useExternalCache: boolean;
+  
+  if (envCacheUrl) {
+    // Environment variable is set - use it
+    CACHE_BASE_URL = envCacheUrl;
+    useExternalCache = true;
+    console.log('[O1JSCacheFromMerkle] Using cache from environment variable');
+  } else if (isProduction) {
+    // Production without env var - use GitHub as fallback
+    CACHE_BASE_URL = GITHUB_CACHE_URL;
+    useExternalCache = true;
+    console.log('[O1JSCacheFromMerkle] Using GitHub Releases cache (production fallback)');
+  } else {
+    // Development - use local API route
+    CACHE_BASE_URL = typeof window !== 'undefined' ? `${window.location.origin}/api/cache` : 'http://localhost:3000/api/cache';
+    useExternalCache = false;
+    console.log('[O1JSCacheFromMerkle] Using local API cache (development)');
+  }
 
   console.log('[O1JSCacheFromMerkle] Pre-loading all cache files into memory...');
   console.log('[O1JSCacheFromMerkle] Cache URL:', CACHE_BASE_URL);
-  console.log('[O1JSCacheFromMerkle] External cache:', useExternalCache ? 'Yes' : 'No (using API route)');
+  console.log('[O1JSCacheFromMerkle] External cache:', useExternalCache);
   
   // Load all files into memory (o1js needs sync access)
   const files: Record<string, { file: string; header: string; data: string }> = {};
