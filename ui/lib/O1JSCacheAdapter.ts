@@ -113,12 +113,18 @@ export async function createO1JSCacheFromMerkle(merkleCache: MerkleCache): Promi
   }
 
   // Get cache URL from environment or default to localhost
-  const CACHE_BASE_URL = typeof window !== 'undefined' 
-    ? (process.env.NEXT_PUBLIC_CACHE_URL || window.location.origin)
-    : 'http://localhost:3000';
+  // If NEXT_PUBLIC_CACHE_URL is set (e.g., GitHub Releases), use it directly
+  // Otherwise, use local API route
+  const externalCacheUrl = process.env.NEXT_PUBLIC_CACHE_URL;
+  const useExternalCache = externalCacheUrl && typeof window !== 'undefined';
+  
+  const CACHE_BASE_URL = useExternalCache 
+    ? externalCacheUrl 
+    : (typeof window !== 'undefined' ? `${window.location.origin}/api/cache` : 'http://localhost:3000/api/cache');
 
   console.log('[O1JSCacheFromMerkle] Pre-loading all cache files into memory...');
   console.log('[O1JSCacheFromMerkle] Cache URL:', CACHE_BASE_URL);
+  console.log('[O1JSCacheFromMerkle] External cache:', useExternalCache ? 'Yes' : 'No (using API route)');
   
   // Load all files into memory (o1js needs sync access)
   const files: Record<string, { file: string; header: string; data: string }> = {};
@@ -146,17 +152,18 @@ export async function createO1JSCacheFromMerkle(merkleCache: MerkleCache): Promi
       let dataFile = isProvingKey ? null : await merkleCache.getFile(fileId);
       let headerFile = isProvingKey ? null : await merkleCache.getFile(`${fileId}.header`);
 
-      // If not in cache, download from API
+      // If not in cache, download from external URL (GitHub) or local API
       if (!dataFile || !headerFile) {
-        console.log(`[O1JSCacheFromMerkle] Downloading ${fileId}...`);
+        console.log(`[O1JSCacheFromMerkle] Downloading ${fileId} from ${useExternalCache ? 'GitHub' : 'local API'}...`);
         
         try {
           const controller = new AbortController();
-          const timeoutId = setTimeout(() => controller.abort(), 10000); // 10s timeout
+          const timeoutId = setTimeout(() => controller.abort(), 30000); // 30s timeout for large files
 
+          // Fetch directly from cache URL (no /api/cache prefix for external URLs)
           const [dataResponse, headerResponse] = await Promise.all([
-            fetch(`${CACHE_BASE_URL}/api/cache/${fileId}`, { signal: controller.signal }),
-            fetch(`${CACHE_BASE_URL}/api/cache/${fileId}.header`, { signal: controller.signal }),
+            fetch(`${CACHE_BASE_URL}/${fileId}`, { signal: controller.signal }),
+            fetch(`${CACHE_BASE_URL}/${fileId}.header`, { signal: controller.signal }),
           ]);
 
           clearTimeout(timeoutId);
