@@ -112,37 +112,16 @@ export async function createO1JSCacheFromMerkle(merkleCache: MerkleCache): Promi
     throw new Error('Manifest not loaded');
   }
 
-  // Get cache URL from environment or use GitHub Releases as fallback
-  // Priority: 1. NEXT_PUBLIC_CACHE_URL env var, 2. GitHub Releases (production), 3. Local API (development)
-  const envCacheUrl = process.env.NEXT_PUBLIC_CACHE_URL;
-  const isProduction = typeof window !== 'undefined' && !window.location.hostname.includes('localhost');
+  // Always use /api/cache route which proxies to GitHub in production
+  // This avoids CORS issues since the API route runs server-side
+  const CACHE_BASE_URL = typeof window !== 'undefined' 
+    ? `${window.location.origin}/api/cache` 
+    : 'http://localhost:3000/api/cache';
   
-  // Default GitHub Releases URL for production
-  const GITHUB_CACHE_URL = 'https://github.com/SuryaSundarVadali/MinaID/releases/download/v1.0.0-cache';
-  
-  let CACHE_BASE_URL: string;
-  let useExternalCache: boolean;
-  
-  if (envCacheUrl) {
-    // Environment variable is set - use it
-    CACHE_BASE_URL = envCacheUrl;
-    useExternalCache = true;
-    console.log('[O1JSCacheFromMerkle] Using cache from environment variable');
-  } else if (isProduction) {
-    // Production without env var - use GitHub as fallback
-    CACHE_BASE_URL = GITHUB_CACHE_URL;
-    useExternalCache = true;
-    console.log('[O1JSCacheFromMerkle] Using GitHub Releases cache (production fallback)');
-  } else {
-    // Development - use local API route
-    CACHE_BASE_URL = typeof window !== 'undefined' ? `${window.location.origin}/api/cache` : 'http://localhost:3000/api/cache';
-    useExternalCache = false;
-    console.log('[O1JSCacheFromMerkle] Using local API cache (development)');
-  }
+  console.log('[O1JSCacheFromMerkle] Using API cache route (proxies to GitHub in production)');
 
   console.log('[O1JSCacheFromMerkle] Pre-loading all cache files into memory...');
   console.log('[O1JSCacheFromMerkle] Cache URL:', CACHE_BASE_URL);
-  console.log('[O1JSCacheFromMerkle] External cache:', useExternalCache);
   
   // Load all files into memory (o1js needs sync access)
   const files: Record<string, { file: string; header: string; data: string }> = {};
@@ -170,9 +149,9 @@ export async function createO1JSCacheFromMerkle(merkleCache: MerkleCache): Promi
       let dataFile = isProvingKey ? null : await merkleCache.getFile(fileId);
       let headerFile = isProvingKey ? null : await merkleCache.getFile(`${fileId}.header`);
 
-      // If not in cache, download from external URL (GitHub) or local API
+      // If not in cache, download from API route (which proxies to GitHub in production)
       if (!dataFile || !headerFile) {
-        console.log(`[O1JSCacheFromMerkle] Downloading ${fileId} from ${useExternalCache ? 'GitHub' : 'local API'}...`);
+        console.log(`[O1JSCacheFromMerkle] Downloading ${fileId} from API route...`);
         
         try {
           const controller = new AbortController();
