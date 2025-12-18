@@ -162,9 +162,12 @@ export class ContractInterface {
     }
     if (this.isCompiled) return;
     
-    console.log('[ContractInterface] Loading prover keys from IndexedDB Merkle cache...');
-    console.log('[ContractInterface] This ensures verification keys match deployed contracts');
+    console.log('[ContractInterface] 🔄 Loading prover keys from cache...');
+    console.log('[ContractInterface] This may take 3-5 seconds with cache, or 90+ seconds without cache');
+    console.log('[ContractInterface] Please wait...');
     console.time('Contract Compilation');
+    
+    const startTime = Date.now();
     
     try {
       // Initialize MerkleCache and load all files into memory for o1js
@@ -173,7 +176,9 @@ export class ContractInterface {
       
       console.log('[ContractInterface] Creating o1js Cache from MerkleCache...');
       this.cache = await createO1JSCacheFromMerkle(merkleCache);
-      console.log('[ContractInterface] Cache loaded, compiling contracts...');
+      
+      const cacheLoadTime = Math.round((Date.now() - startTime) / 1000);
+      console.log(`[ContractInterface] ✅ Cache loaded in ${cacheLoadTime}s, compiling contracts...`);
       
       console.log('[ContractInterface] Compiling DIDRegistry with cache...');
       const didRegistryResult = await DIDRegistry.compile({ cache: this.cache });
@@ -184,10 +189,34 @@ export class ContractInterface {
       console.log('[ContractInterface] ZKPVerifier compiled, verification key:', zkpVerifierResult.verificationKey.hash.toString().slice(0, 10) + '...');
       
       this.isCompiled = true;
-      console.log('[ContractInterface] ✅ All contracts compiled successfully with cached keys');
+      const totalTime = Math.round((Date.now() - startTime) / 1000);
+      console.log(`[ContractInterface] ✅ All contracts compiled successfully in ${totalTime}s`);
       console.log('[ContractInterface] ✅ Cache retained in memory for transaction proving');
-    } catch (error) {
-      console.error('[ContractInterface] Compilation failed:', error);
+    } catch (error: any) {
+      const totalTime = Math.round((Date.now() - startTime) / 1000);
+      console.error(`[ContractInterface] ❌ Compilation failed after ${totalTime}s:`, error);
+      
+      // Provide helpful error messages
+      if (error.message?.includes('404') || error.message?.includes('Failed to fetch')) {
+        console.error('[ContractInterface]');
+        console.error('[ContractInterface] 🔧 CACHE ERROR DETECTED');
+        console.error('[ContractInterface] ════════════════════════════════════════');
+        console.error('[ContractInterface] Cache files are not accessible (404 errors).');
+        console.error('[ContractInterface]');
+        console.error('[ContractInterface] This usually means:');
+        console.error('[ContractInterface] 1. Cache files not deployed to production (too large for Vercel free plan)');
+        console.error('[ContractInterface] 2. NEXT_PUBLIC_CACHE_URL not configured correctly');
+        console.error('[ContractInterface] 3. External cache host is down');
+        console.error('[ContractInterface]');
+        console.error('[ContractInterface] 📖 See: ui/QUICK_FIX_GUIDE.md for solutions');
+        console.error('[ContractInterface]');
+        console.error('[ContractInterface] Quick fix: Host cache on GitHub Releases');
+        console.error('[ContractInterface]   1. Run: ui/scripts/upload-cache-to-github.sh');
+        console.error('[ContractInterface]   2. Set NEXT_PUBLIC_CACHE_URL in Vercel');
+        console.error('[ContractInterface]   3. Redeploy');
+        console.error('[ContractInterface] ════════════════════════════════════════');
+      }
+      
       throw error;
     } finally {
       console.timeEnd('Contract Compilation');
