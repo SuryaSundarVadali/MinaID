@@ -7,6 +7,8 @@ import {
   PublicKey,
   Poseidon,
   Struct,
+  MerkleMap,
+  MerkleMapWitness,
 } from 'o1js';
 
 import { AgeProof, AgeProofPublicInput } from './AgeVerificationProgram.js';
@@ -39,6 +41,11 @@ class OwnershipTransferredEvent extends Struct({
   newOwnerX: Field,
 }) {}
 
+class UidaiIssuerUpdatedEvent extends Struct({
+  oldIssuerX: Field,
+  newIssuerX: Field,
+}) {}
+
 /**
  * ZKPVerifier V2 Smart Contract
  * 
@@ -68,6 +75,7 @@ export class ZKPVerifierV2 extends SmartContract {
     IssuerAdded: IssuerAddedEvent,
     MinimumAgeUpdated: MinimumAgeUpdatedEvent,
     OwnershipTransferred: OwnershipTransferredEvent,
+    UidaiIssuerUpdated: UidaiIssuerUpdatedEvent,
   };
 
   // Root hash of trusted issuers (using Merkle tree for scalability)
@@ -82,14 +90,18 @@ export class ZKPVerifierV2 extends SmartContract {
   // Minimum age requirement for age verification
   @state(Field) minimumAge = State<Field>();
 
+  // UIDAI Aadhar government issuer (trusted authority for credentials)
+  @state(PublicKey) uidaiIssuer = State<PublicKey>();
+
   /**
    * Initialize the contract
    */
   init() {
     super.init();
     
-    // Initialize empty trusted issuers root
-    this.trustedIssuersRoot.set(Field(0));
+    // Initialize with empty Merkle Map root
+    const emptyMapRoot = new MerkleMap().getRoot();
+    this.trustedIssuersRoot.set(emptyMapRoot);
     
     // Initialize counters
     this.totalVerifications.set(Field(0));
@@ -99,6 +111,9 @@ export class ZKPVerifierV2 extends SmartContract {
     
     // Set contract deployer as owner
     this.owner.set(this.sender.getAndRequireSignature());
+    
+    // UIDAI issuer will be set by owner after deployment
+    this.uidaiIssuer.set(PublicKey.empty());
   }
 
   /**
@@ -123,6 +138,16 @@ export class ZKPVerifierV2 extends SmartContract {
     const subject = publicInput.subjectPublicKey;
     const minAge = publicInput.minimumAge;
     const timestamp = publicInput.timestamp;
+    const issuer = publicInput.issuerPublicKey;
+
+    // Security check: Prover cannot be the verifier
+    const sender = this.sender.getAndRequireSignature();
+    const isSamePerson = sender.equals(subject);
+    isSamePerson.assertFalse();
+
+    // Security check: Issuer must be the trusted UIDAI Aadhar authority
+    const trustedIssuer = this.uidaiIssuer.getAndRequireEquals();
+    issuer.equals(trustedIssuer).assertTrue();
 
     // Get contract's minimum age requirement
     const contractMinAge = this.minimumAge.getAndRequireEquals();
@@ -162,6 +187,15 @@ export class ZKPVerifierV2 extends SmartContract {
     issuerPublicKey: PublicKey,
     timestamp: Field
   ) {
+    // Security check: Prover cannot be the verifier
+    const sender = this.sender.getAndRequireSignature();
+    const isSamePerson = sender.equals(subject);
+    isSamePerson.assertFalse();
+
+    // Security check: Issuer must be the trusted UIDAI Aadhar authority
+    const trustedIssuer = this.uidaiIssuer.getAndRequireEquals();
+    issuerPublicKey.equals(trustedIssuer).assertTrue();
+
     // Get minimum age requirement
     const minAge = this.minimumAge.getAndRequireEquals();
 
@@ -207,6 +241,15 @@ export class ZKPVerifierV2 extends SmartContract {
     commitment: Field,
     issuerPublicKey: PublicKey
   ) {
+    // Security check: Prover cannot be the verifier
+    const sender = this.sender.getAndRequireSignature();
+    const isSamePerson = sender.equals(subject);
+    isSamePerson.assertFalse();
+
+    // Security check: Issuer must be the trusted UIDAI Aadhar authority
+    const trustedIssuer = this.uidaiIssuer.getAndRequireEquals();
+    issuerPublicKey.equals(trustedIssuer).assertTrue();
+
     // Create commitment that should match the proof
     const expectedCommitment = Poseidon.hash([
       kycHash,
@@ -234,21 +277,72 @@ export class ZKPVerifierV2 extends SmartContract {
    * Add Trusted Issuer
    * 
    * Only contract owner can add trusted issuers.
+   * Uses a Merkle Map to efficiently store and verify trusted issuers.
    * 
    * @param issuer - Public key of the issuer to trust
+   * @param witness - Merkle witness proving the current state of the map
    */
   @method
-  async addTrustedIssuer(issuer: PublicKey) {
+  async addTrustedIssuer(issuer: PublicKey, witness: MerkleMapWitness) {
     // Verify sender is owner
     const owner = this.owner.getAndRequireEquals();
     this.sender.getAndRequireSignature().assertEquals(owner);
 
-    // TODO: Implement Merkle tree update for trusted issuers
-    // For now, emit event
+    // Get current Merkle Map root from on-chain state
+    const currentRoot = this.trustedIssuersRoot.getAndRequireEquals();
+
+    // Generate key from issuer's public key for Merkle Map
+    const key = this.getIssuerKey(issuer);
+
+    // Verify the witness is valid for current root with value 0 (empty slot)
+    // This proves that the issuer is not already in the trusted list
+    const [witnessRoot, witnessKey] = witness.computeRootAndKey(Field(0));
+    currentRoot.assertEquals(witnessRoot, 'Invalid Merkle witness or issuer already trusted');
+    key.assertEquals(witnessKey, 'Key mismatch in witness');
+
+    // Update the Merkle Map with the new trusted issuer (value = 1 means trusted)
+    const [newRoot] = witness.computeRootAndKey(Field(1));
+    this.trustedIssuersRoot.set(newRoot);
+
+    // Emit event
     this.emitEvent('IssuerAdded', new IssuerAddedEvent({
       issuerX: issuer.x,
       timestamp: this.network.blockchainLength.getAndRequireEquals().value,
     }));
+  }
+
+  /**
+   * Verify Trusted Issuer
+   * 
+   * Verifies that an issuer is in the trusted issuers list using a Merkle witness.
+   * This method can be called by verification methods to ensure issuers are trusted.
+   * 
+   * @param issuer - Public key of the issuer to verify
+   * @param witness - Merkle witness proving the issuer is in the trusted list
+   */
+  @method
+  async verifyTrustedIssuer(issuer: PublicKey, witness: MerkleMapWitness) {
+    // Get current Merkle Map root from on-chain state
+    const currentRoot = this.trustedIssuersRoot.getAndRequireEquals();
+
+    // Generate key from issuer's public key for Merkle Map
+    const key = this.getIssuerKey(issuer);
+
+    // Verify the witness proves the issuer is trusted (value = 1)
+    const [witnessRoot, witnessKey] = witness.computeRootAndKey(Field(1));
+    currentRoot.assertEquals(witnessRoot, 'Invalid Merkle witness or issuer not trusted');
+    key.assertEquals(witnessKey, 'Key mismatch in witness');
+  }
+
+  /**
+   * Helper method to generate Merkle Map key from issuer public key
+   * Ensures consistent key generation across all methods
+   * 
+   * @param issuer - Public key of the issuer
+   * @returns Field representing the key in the Merkle Map
+   */
+  private getIssuerKey(issuer: PublicKey): Field {
+    return Poseidon.hash(issuer.toFields());
   }
 
   /**
@@ -318,5 +412,42 @@ export class ZKPVerifierV2 extends SmartContract {
   @method.returns(Field)
   async getMinimumAge(): Promise<Field> {
     return this.minimumAge.getAndRequireEquals();
+  }
+
+  /**
+   * Set UIDAI Issuer
+   * 
+   * Sets the trusted UIDAI Aadhar government authority public key.
+   * Only the contract owner can call this method.
+   * 
+   * @param newUidaiIssuer - Public key of the UIDAI Aadhar authority
+   */
+  @method
+  async setUidaiIssuer(newUidaiIssuer: PublicKey) {
+    // Verify sender is owner
+    const owner = this.owner.getAndRequireEquals();
+    this.sender.getAndRequireSignature().assertEquals(owner);
+
+    // Get old issuer for event
+    const oldIssuer = this.uidaiIssuer.getAndRequireEquals();
+
+    // Update UIDAI issuer
+    this.uidaiIssuer.set(newUidaiIssuer);
+
+    // Emit event
+    this.emitEvent('UidaiIssuerUpdated', new UidaiIssuerUpdatedEvent({
+      oldIssuerX: oldIssuer.x,
+      newIssuerX: newUidaiIssuer.x,
+    }));
+  }
+
+  /**
+   * Get UIDAI Issuer
+   * 
+   * Returns the current trusted UIDAI issuer public key.
+   */
+  @method.returns(PublicKey)
+  async getUidaiIssuer(): Promise<PublicKey> {
+    return this.uidaiIssuer.getAndRequireEquals();
   }
 }

@@ -39,7 +39,86 @@ export type VerificationResult = {
   subjectDID?: string;
   txHash?: string;
   verificationMethod?: 'on-chain' | 'client-side';
+  blockHeight?: number;
+  confirmations?: number;
+  explorerUrl?: string;
 };
+
+/**
+ * Fetch transaction details from MinaExplorer after successful inclusion
+ */
+async function getTransactionFromExplorer(txHash: string): Promise<{
+  blockHeight?: number;
+  confirmed: boolean;
+  explorerUrl: string;
+  indexedByExplorer?: boolean;
+} | null> {
+  try {
+    // Use Minascan GraphQL endpoint for queries
+    const GRAPHQL_ENDPOINT = 'https://api.minascan.io/node/devnet/v1/graphql';
+    // Use MinaExplorer for UI links
+    const EXPLORER_BASE_URL = 'https://devnet.minaexplorer.com';
+    
+    // Query bestChain to find the transaction
+    const response = await fetch(GRAPHQL_ENDPOINT, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        query: `
+          query GetTransaction($hash: String!) {
+            bestChain(maxLength: 290) {
+              protocolState {
+                consensusState {
+                  blockHeight
+                }
+              }
+              transactions {
+                zkappCommands {
+                  hash
+                  failureReason {
+                    failures
+                  }
+                }
+              }
+            }
+          }
+        `,
+        variables: { hash: txHash },
+      }),
+    });
+
+    const result = await response.json();
+    const blocks = result.data?.bestChain || [];
+
+    // Search for our transaction
+    for (const block of blocks) {
+      const zkappCommands = block.transactions?.zkappCommands || [];
+      const tx = zkappCommands.find((cmd: any) => cmd.hash === txHash);
+      
+      if (tx && !tx.failureReason) {
+        const blockHeight = parseInt(block.protocolState?.consensusState?.blockHeight || '0');
+        
+        // Transaction found on blockchain and visible via GraphQL
+        return {
+          blockHeight,
+          confirmed: true,
+          indexedByExplorer: true, // If GraphQL returns it, it's indexed
+          explorerUrl: `${EXPLORER_BASE_URL}/transaction/${txHash}`,
+        };
+      }
+    }
+
+    // If not found but transaction was successful, return minimal info
+    return {
+      confirmed: false,
+      indexedByExplorer: false,
+      explorerUrl: `${EXPLORER_BASE_URL}/transaction/${txHash}`,
+    };
+  } catch (error) {
+    console.warn('[getTransactionFromExplorer] Error:', error);
+    return null;
+  }
+}
 
 export function VerifierDashboard() {
   const router = useRouter();
@@ -357,6 +436,9 @@ export function VerifierDashboard() {
       let onChainVerified = false;
       let transactionHash = '';
       let verificationMethod: 'on-chain' | 'client-side' = 'client-side';
+      let explorerBlockHeight: number | undefined;
+      let explorerConfirmations: number | undefined;
+      let explorerUrl: string | undefined;
 
       if (useOnChain && cryptoVerified) {
         const walletStatus = canSubmit();
@@ -419,27 +501,55 @@ export function VerifierDashboard() {
             );
 
             if (submissionResult.success && submissionResult.transactionHash) {
+              transactionHash = submissionResult.transactionHash;
+              setTxHash(transactionHash);
               setVerificationProgress(80);
               setVerificationStatus('Monitoring transaction...');
               
-              // Monitor the transaction
+              // Monitor the transaction (wait indefinitely for blockchain confirmation)
               const monitorResult = await monitorTransaction(
-                submissionResult.transactionHash,
+                transactionHash,
                 {
                   onStatusChange: (status, message) => {
                     setTxStatus(status);
                     setVerificationStatus(message);
                   },
                   onProgress: (elapsed, maxWait) => {
-                    const progress = 80 + (elapsed / maxWait) * 20;
-                    setVerificationProgress(Math.min(progress, 99));
+                    const progress = 80 + (elapsed / maxWait) * 15;
+                    setVerificationProgress(Math.min(progress, 95));
                   },
+                },
+                {
+                  maxWaitTime: 30 * 60 * 1000, // 30 minutes - extended timeout for blockchain confirmation
+                  requiredConfirmations: 1,
                 }
               );
 
               if (monitorResult.status === 'confirmed' || monitorResult.status === 'included') {
                 onChainVerified = true;
                 verificationMethod = 'on-chain';
+                
+                // Fetch transaction details from MinaExplorer
+                setVerificationProgress(96);
+                setVerificationStatus('Fetching transaction details from MinaExplorer...');
+                const explorerData = await getTransactionFromExplorer(transactionHash);
+                
+                if (explorerData) {
+                  console.log('[Verify] Transaction found on MinaExplorer:', explorerData);
+                  
+                  // Store explorer data in variables
+                  explorerBlockHeight = explorerData.blockHeight;
+                  explorerConfirmations = monitorResult.confirmations;
+                  explorerUrl = explorerData.explorerUrl;
+                  
+                  // If GraphQL returned the transaction, it's confirmed and indexed
+                  setVerificationStatus(
+                    `✅ Verified on MinaExplorer! Block: ${explorerData.blockHeight || 'pending'}, Confirmations: ${monitorResult.confirmations}`
+                  );
+                } else {
+                  explorerUrl = `https://devnet.minaexplorer.com/transaction/${transactionHash}`;
+                  setVerificationStatus('✅ On-chain verification confirmed!');
+                }
               }
             }
           } catch (onChainError: any) {
@@ -458,10 +568,22 @@ export function VerifierDashboard() {
       const hasCredentialChecks = Object.keys(credentialChecks).length > 0;
       
       let status: 'verified' | 'failed' = 'failed';
-      if (onChainVerified || (cryptoVerified && !credentialFailed)) {
-        status = 'verified';
-      } else if (hasCredentialChecks && !credentialFailed) {
-        status = 'verified';
+      
+      // If on-chain verification was attempted, ONLY show verified if blockchain confirmed
+      if (useOnChain && cryptoVerified) {
+        if (onChainVerified) {
+          status = 'verified';
+        } else {
+          // On-chain verification was attempted but not confirmed on blockchain
+          status = 'failed';
+        }
+      } else {
+        // Client-side verification only (when on-chain is disabled)
+        if (cryptoVerified && !credentialFailed) {
+          status = 'verified';
+        } else if (hasCredentialChecks && !credentialFailed) {
+          status = 'verified';
+        }
       }
 
       const result = { 
@@ -476,6 +598,9 @@ export function VerifierDashboard() {
         onChainVerified,
         txHash: transactionHash,
         verificationMethod,
+        blockHeight: explorerBlockHeight,
+        confirmations: explorerConfirmations,
+        explorerUrl: explorerUrl,
       };
       
       const newHistory = [result, ...history].slice(0, 20);
@@ -591,6 +716,40 @@ export function VerifierDashboard() {
                       {verificationResult.credentialChecks.citizenship.matches ? '✅' : '❌'} Citizenship: {verificationResult.credentialChecks.citizenship.expected}
                     </div>
                   )}
+                </div>
+              )}
+
+              {verificationResult.verificationMethod === 'on-chain' && verificationResult.explorerUrl && (
+                <div style={{ marginBottom: '1rem', padding: '1rem', background: '#EFF6FF', borderRadius: '8px', border: '1px solid #BFDBFE' }}>
+                  <p style={{ fontFamily: 'var(--font-monument-bold)', fontSize: '0.875rem', color: '#1E40AF', marginBottom: '0.75rem' }}>
+                    🔗 On-Chain Verification
+                  </p>
+                  {verificationResult.blockHeight && (
+                    <p style={{ fontFamily: 'var(--font-monument)', fontSize: '0.75rem', color: '#1E3A8A', marginBottom: '0.25rem' }}>
+                      Block Height: <strong>{verificationResult.blockHeight}</strong>
+                    </p>
+                  )}
+                  {verificationResult.confirmations !== undefined && (
+                    <p style={{ fontFamily: 'var(--font-monument)', fontSize: '0.75rem', color: '#1E3A8A', marginBottom: '0.75rem' }}>
+                      Confirmations: <strong>{verificationResult.confirmations}</strong>
+                    </p>
+                  )}
+                  <a 
+                    href={verificationResult.explorerUrl} 
+                    target="_blank" 
+                    rel="noopener noreferrer"
+                    style={{ 
+                      fontFamily: 'var(--font-monument)', 
+                      fontSize: '0.75rem', 
+                      color: '#2563EB',
+                      textDecoration: 'underline',
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: '0.25rem'
+                    }}
+                  >
+                    View on MinaExplorer →
+                  </a>
                 </div>
               )}
 

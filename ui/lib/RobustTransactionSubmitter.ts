@@ -9,7 +9,7 @@ import { GeneratedProof } from './SmartProofGenerator';
 import { markProofSubmitted, validateProofForSubmission } from './PreSubmissionValidator';
 
 // Network configuration
-const GRAPHQL_ENDPOINT = 'https://api.minascan.io/archive/devnet/v1/graphql';
+const GRAPHQL_ENDPOINT = 'https://api.minascan.io/node/devnet/v1/graphql';
 
 // Retry configuration
 const MAX_RETRIES = 4;
