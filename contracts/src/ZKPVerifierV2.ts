@@ -272,6 +272,29 @@ export class ZKPVerifierV2 extends SmartContract {
   }
 
   /**
+   * Verify Trusted Issuer
+   * 
+   * Verifies that an issuer is in the trusted issuers list using a Merkle witness.
+   * This method can be called by verification methods to ensure issuers are trusted.
+   * 
+   * @param issuer - Public key of the issuer to verify
+   * @param witness - Merkle witness proving the issuer is in the trusted list
+   */
+  @method
+  async verifyTrustedIssuer(issuer: PublicKey, witness: MerkleMapWitness) {
+    // Get current Merkle Map root from on-chain state
+    const currentRoot = this.trustedIssuersRoot.getAndRequireEquals();
+
+    // Generate key from issuer's public key for Merkle Map
+    const key = Poseidon.hash(issuer.toFields());
+
+    // Verify the witness proves the issuer is trusted (value = 1)
+    const [witnessRoot, witnessKey] = witness.computeRootAndKey(Field(1));
+    currentRoot.assertEquals(witnessRoot, 'Invalid Merkle witness or issuer not trusted');
+    key.assertEquals(witnessKey, 'Key mismatch in witness');
+  }
+
+  /**
    * Update Minimum Age Requirement
    * 
    * Only contract owner can update minimum age.
