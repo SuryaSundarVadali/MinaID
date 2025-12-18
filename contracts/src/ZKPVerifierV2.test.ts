@@ -17,6 +17,7 @@ import {
   MerkleMap,
 } from 'o1js';
 import { ZKPVerifierV2 } from './ZKPVerifierV2.js';
+import { AgeVerificationProgram } from './AgeVerificationProgram.js';
 import { log, assert } from './test-utils.js';
 
 describe('ZKPVerifierV2 - Merkle Tree Implementation', () => {
@@ -54,9 +55,13 @@ describe('ZKPVerifierV2 - Merkle Tree Implementation', () => {
     zkpVerifierAddress = contractKey.toPublicKey();
     zkpVerifier = new ZKPVerifierV2(zkpVerifierAddress);
 
-    log.info('Compiling contract...');
+    log.info('Compiling AgeVerificationProgram dependency...');
+    await AgeVerificationProgram.compile();
+    log.success('AgeVerificationProgram compiled');
+
+    log.info('Compiling ZKPVerifierV2 contract...');
     await ZKPVerifierV2.compile();
-    log.success('Contract compiled');
+    log.success('ZKPVerifierV2 compiled');
 
     const deployTx = await Mina.transaction(deployer, async () => {
       AccountUpdate.fundNewAccount(deployer);
