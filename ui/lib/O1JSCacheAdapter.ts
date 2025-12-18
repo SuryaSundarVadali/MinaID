@@ -138,9 +138,9 @@ export async function createO1JSCacheFromMerkle(merkleCache: MerkleCache): Promi
   let downloaded = 0;
   let inMemoryOnly = 0;
   let inIndexedDB = 0;
-  const batchSize = 5; // Download 5 files at a time
+  const batchSize = 3; // Optimal: 3-4 parallel downloads (avoid browser throttling)
 
-  // Process in batches to avoid overwhelming the browser
+  // Process in batches for optimal throughput
   for (let batchStart = 0; batchStart < baseFileIds.length; batchStart += batchSize) {
     const batchEnd = Math.min(batchStart + batchSize, baseFileIds.length);
     const batch = baseFileIds.slice(batchStart, batchEnd);
@@ -161,9 +161,9 @@ export async function createO1JSCacheFromMerkle(merkleCache: MerkleCache): Promi
         
         try {
           const controller = new AbortController();
-          const timeoutId = setTimeout(() => controller.abort(), 60000); // 60s timeout for large files
+          const timeoutId = setTimeout(() => controller.abort(), 90000); // 90s for large proving keys
 
-          // Fetch from cache URL
+          // Fetch from cache URL with streaming
           // GitHub Releases: Direct download (302 redirect to CDN, automatically followed)
           // Local API: Serves from public/cache/
           const [dataResponse, headerResponse] = await Promise.all([
@@ -182,10 +182,42 @@ export async function createO1JSCacheFromMerkle(merkleCache: MerkleCache): Promi
           clearTimeout(timeoutId);
 
           if (dataResponse.ok && headerResponse.ok) {
-            const dataArrayBuffer = await dataResponse.arrayBuffer();
-            const headerArrayBuffer = await headerResponse.arrayBuffer();
+            // Stream download with chunking for large files
+            const contentLength = parseInt(dataResponse.headers.get('content-length') || '0');
+            const dataReader = dataResponse.body?.getReader();
             
-            dataFile = new Uint8Array(dataArrayBuffer);
+            if (!dataReader) {
+              throw new Error(`No readable stream for ${fileId}`);
+            }
+
+            const dataChunks: Uint8Array[] = [];
+            let dataSize = 0;
+            
+            // Stream data file
+            while (true) {
+              const { done, value } = await dataReader.read();
+              if (done) break;
+              
+              dataChunks.push(value);
+              dataSize += value.byteLength;
+              
+              // Progress logging for large files (>10MB)
+              if (contentLength > 10 * 1024 * 1024 && dataSize % (5 * 1024 * 1024) < value.byteLength) {
+                const progress = ((dataSize / contentLength) * 100).toFixed(0);
+                console.log(`[O1JSCacheFromMerkle] ${fileId}: ${progress}% (${(dataSize / 1024 / 1024).toFixed(1)} MB)`);
+              }
+            }
+
+            // Concatenate chunks
+            dataFile = new Uint8Array(dataSize);
+            let offset = 0;
+            for (const chunk of dataChunks) {
+              dataFile.set(chunk, offset);
+              offset += chunk.byteLength;
+            }
+            
+            // Header is small, can read directly
+            const headerArrayBuffer = await headerResponse.arrayBuffer();
             headerFile = new Uint8Array(headerArrayBuffer);
 
             // Store in MerkleCache ONLY if it's a small file (verification keys, lagrange basis, srs)
