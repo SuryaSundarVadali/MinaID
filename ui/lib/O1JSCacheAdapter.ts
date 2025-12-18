@@ -112,13 +112,19 @@ export async function createO1JSCacheFromMerkle(merkleCache: MerkleCache): Promi
     throw new Error('Manifest not loaded');
   }
 
-  // Always use /api/cache route which proxies to GitHub in production
-  // This avoids CORS issues since the API route runs server-side
-  const CACHE_BASE_URL = typeof window !== 'undefined' 
+  // GitHub Release assets are public and CORS-friendly!
+  // In production: download directly from GitHub (faster, no proxy overhead)
+  // In development: use local API route (serves from public/cache/)
+  const isProduction = typeof window !== 'undefined' && !window.location.hostname.includes('localhost');
+  
+  const GITHUB_RELEASES_URL = 'https://github.com/SuryaSundarVadali/MinaID/releases/download/v1.0.0-cache';
+  const LOCAL_API_URL = typeof window !== 'undefined' 
     ? `${window.location.origin}/api/cache` 
     : 'http://localhost:3000/api/cache';
   
-  console.log('[O1JSCacheFromMerkle] Using API cache route (proxies to GitHub in production)');
+  const CACHE_BASE_URL = isProduction ? GITHUB_RELEASES_URL : LOCAL_API_URL;
+  
+  console.log('[O1JSCacheFromMerkle] Cache source:', isProduction ? 'GitHub Releases (direct)' : 'Local API');
 
   console.log('[O1JSCacheFromMerkle] Pre-loading all cache files into memory...');
   console.log('[O1JSCacheFromMerkle] Cache URL:', CACHE_BASE_URL);
@@ -149,18 +155,28 @@ export async function createO1JSCacheFromMerkle(merkleCache: MerkleCache): Promi
       let dataFile = isProvingKey ? null : await merkleCache.getFile(fileId);
       let headerFile = isProvingKey ? null : await merkleCache.getFile(`${fileId}.header`);
 
-      // If not in cache, download from API route (which proxies to GitHub in production)
+      // If not in cache, download from cache source
       if (!dataFile || !headerFile) {
-        console.log(`[O1JSCacheFromMerkle] Downloading ${fileId} from API route...`);
+        console.log(`[O1JSCacheFromMerkle] Downloading ${fileId} from cache...`);
         
         try {
           const controller = new AbortController();
-          const timeoutId = setTimeout(() => controller.abort(), 30000); // 30s timeout for large files
+          const timeoutId = setTimeout(() => controller.abort(), 60000); // 60s timeout for large files
 
-          // Fetch directly from cache URL (no /api/cache prefix for external URLs)
+          // Fetch from cache URL
+          // GitHub Releases: Direct download (302 redirect to CDN, automatically followed)
+          // Local API: Serves from public/cache/
           const [dataResponse, headerResponse] = await Promise.all([
-            fetch(`${CACHE_BASE_URL}/${fileId}`, { signal: controller.signal }),
-            fetch(`${CACHE_BASE_URL}/${fileId}.header`, { signal: controller.signal }),
+            fetch(`${CACHE_BASE_URL}/${fileId}`, { 
+              signal: controller.signal,
+              redirect: 'follow', // Explicitly follow redirects (default behavior)
+              cache: 'force-cache' // Use browser cache if available
+            }),
+            fetch(`${CACHE_BASE_URL}/${fileId}.header`, { 
+              signal: controller.signal,
+              redirect: 'follow',
+              cache: 'force-cache'
+            }),
           ]);
 
           clearTimeout(timeoutId);
