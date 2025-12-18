@@ -112,7 +112,13 @@ export async function createO1JSCacheFromMerkle(merkleCache: MerkleCache): Promi
     throw new Error('Manifest not loaded');
   }
 
+  // Get cache URL from environment or default to localhost
+  const CACHE_BASE_URL = typeof window !== 'undefined' 
+    ? (process.env.NEXT_PUBLIC_CACHE_URL || window.location.origin)
+    : 'http://localhost:3000';
+
   console.log('[O1JSCacheFromMerkle] Pre-loading all cache files into memory...');
+  console.log('[O1JSCacheFromMerkle] Cache URL:', CACHE_BASE_URL);
   
   // Load all files into memory (o1js needs sync access)
   const files: Record<string, { file: string; header: string; data: string }> = {};
@@ -145,10 +151,15 @@ export async function createO1JSCacheFromMerkle(merkleCache: MerkleCache): Promi
         console.log(`[O1JSCacheFromMerkle] Downloading ${fileId}...`);
         
         try {
+          const controller = new AbortController();
+          const timeoutId = setTimeout(() => controller.abort(), 10000); // 10s timeout
+
           const [dataResponse, headerResponse] = await Promise.all([
-            fetch(`/api/cache/${fileId}`),
-            fetch(`/api/cache/${fileId}.header`),
+            fetch(`${CACHE_BASE_URL}/api/cache/${fileId}`, { signal: controller.signal }),
+            fetch(`${CACHE_BASE_URL}/api/cache/${fileId}.header`, { signal: controller.signal }),
           ]);
+
+          clearTimeout(timeoutId);
 
           if (dataResponse.ok && headerResponse.ok) {
             const dataArrayBuffer = await dataResponse.arrayBuffer();
@@ -178,10 +189,17 @@ export async function createO1JSCacheFromMerkle(merkleCache: MerkleCache): Promi
             }
           } else {
             console.error(`[O1JSCacheFromMerkle] HTTP error for ${fileId}: ${dataResponse.status}/${headerResponse.status}`);
+            console.warn(`[O1JSCacheFromMerkle] ⚠️ Failed to download ${fileId}. Fallback to manual compilation.`);
           }
-        } catch (error) {
-          console.error(`[O1JSCacheFromMerkle] Failed to download ${fileId}:`, error);
-          return; // Skip this file
+        } catch (error: any) {
+          if (error.name === 'AbortError') {
+            console.warn(`[O1JSCacheFromMerkle] ⏱️ Timeout downloading ${fileId}`);
+          } else if (error.message?.includes('Failed to fetch') || error.message?.includes('ERR_CONNECTION_REFUSED')) {
+            console.warn(`[O1JSCacheFromMerkle] 🔌 Cache server unavailable. Compilation will proceed without cache.`);
+          } else {
+            console.error(`[O1JSCacheFromMerkle] Failed to download ${fileId}:`, error);
+          }
+          return; // Skip this file - will trigger manual compilation
         }
       }
 

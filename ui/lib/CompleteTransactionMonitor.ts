@@ -1,19 +1,17 @@
 /**
  * CompleteTransactionMonitor.ts
- * 
- * Monitors transaction status with GraphQL polling.
- * Handles "in progress" state properly and provides confirmation tracking.
- * Integrates with toast notifications for user feedback.
+ * Monitors transaction status using Blockberry API (primary) and Minascan Archive (fallback).
  */
 
 import { notify } from './ToastNotifications';
+import { checkBlockberryTransaction } from './BlockberryMonitor';
 
-// Network configuration
-const GRAPHQL_ENDPOINT = 'https://api.minascan.io/archive/devnet/v1/graphql';
+// [FIX] Use the official Minascan Archive Node for Devnet
+const GRAPHQL_ENDPOINT = 'https://api.minascan.io/node/devnet/v1/graphql';
 
 // Monitoring configuration
-const POLL_INTERVAL_MS = 3000; // 3 seconds
-const MAX_WAIT_TIME_MS = 5 * 60 * 1000; // 5 minutes
+const POLL_INTERVAL_MS = 5000; // 5 seconds - check frequently for blockchain confirmation
+const MAX_WAIT_TIME_MS = 30 * 60 * 1000; // 30 minutes
 const IN_PROGRESS_EXTRA_WAIT_MS = 30 * 1000; // Extra 30s for "in progress"
 
 export type TxStatus = 
@@ -41,10 +39,8 @@ export interface MonitoringCallbacks {
   onProgress?: (elapsed: number, maxWait: number) => void;
   onConfirmed?: (result: MonitoringResult) => void;
   onFailed?: (reason: string) => void;
-  showToasts?: boolean; // Enable/disable toast notifications
+  showToasts?: boolean; 
 }
-
-import { checkBlockberryTransaction } from './BlockberryMonitor';
 
 /**
  * Query transaction status using Blockberry API with GraphQL fallback
@@ -53,12 +49,11 @@ async function queryTransactionStatus(
   txHash: string
 ): Promise<{ status: TxStatus; blockHeight?: number; failureReason?: string }> {
   try {
-    // Primary: Try Blockberry API
-
-    const NEXT_PUBLIC_BLOCKBERRY_API_KEY='lTArAoBso7ZH6eH4dhCRFFa5runKoS';
-    const blockberryKey = NEXT_PUBLIC_BLOCKBERRY_API_KEY;
-    if (blockberryKey) {
-      const bbResult = await checkBlockberryTransaction(txHash, blockberryKey);
+    // 1. Primary: Try Blockberry API
+    const NEXT_PUBLIC_BLOCKBERRY_API_KEY = 'lTArAoBso7ZH6eH4dhCRFFa5runKoS';
+    
+    if (NEXT_PUBLIC_BLOCKBERRY_API_KEY) {
+      const bbResult = await checkBlockberryTransaction(txHash, NEXT_PUBLIC_BLOCKBERRY_API_KEY);
       if (bbResult.included) {
         return { status: 'included', blockHeight: bbResult.data?.blockHeight || 0 };
       }
@@ -67,17 +62,56 @@ async function queryTransactionStatus(
       }
     }
 
-    // Fallback: Use GraphQL to check if transaction is included in a block
+    // 2. Fallback: Use Minascan Archive GraphQL
+    // First check mempool
+    const mempoolResponse = await fetch(GRAPHQL_ENDPOINT, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        query: `
+          query CheckMempool($hash: String!) {
+            pooledZkappCommands(hashes: [$hash]) {
+              hash
+              failureReason
+            }
+          }
+        `,
+        variables: { hash: txHash },
+      }),
+    });
+    
+    const mempoolResult = await mempoolResponse.json();
+    
+    if (mempoolResult.data?.pooledZkappCommands?.length > 0) {
+      const pooledCmd = mempoolResult.data.pooledZkappCommands[0];
+      if (pooledCmd.failureReason) {
+        return { status: 'failed', failureReason: JSON.stringify(pooledCmd.failureReason) };
+      }
+      return { status: 'in_mempool' };
+    }
+    
+    // If not in mempool, check bestChain for included transactions
     const response = await fetch(GRAPHQL_ENDPOINT, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         query: `
           query GetTransaction($hash: String!) {
-            transactions(query: {hash: $hash, canonical: true}, limit: 1) {
-              hash
-              blockHeight
-              failureReason
+            bestChain(maxLength: 290) {
+              protocolState {
+                consensusState {
+                  blockHeight
+                }
+              }
+              transactions {
+                zkappCommands {
+                  hash
+                  failureReason {
+                    failures
+                    index
+                  }
+                }
+              }
             }
           }
         `,
@@ -88,31 +122,44 @@ async function queryTransactionStatus(
     const result = await response.json();
     
     if (result.errors) {
-      console.log('[TransactionMonitor] GraphQL error:', result.errors);
+      console.warn('[TransactionMonitor] GraphQL error:', result.errors);
       return { status: 'unknown' };
     }
     
-    const transactions = result.data?.transactions || [];
+    // Parse bestChain blocks
+    const blocks = result.data?.bestChain || [];
     
-    // If transaction is found in a block, it's included
-    if (transactions.length > 0) {
-      const tx = transactions[0];
-      if (tx.failureReason) {
-        const reason = Array.isArray(tx.failureReason) 
-          ? tx.failureReason.join(', ') 
-          : String(tx.failureReason);
-        return { status: 'failed', failureReason: reason };
+    // Search through recent blocks for our transaction
+    for (const block of blocks) {
+      const zkappCommands = block.transactions?.zkappCommands || [];
+      const tx = zkappCommands.find((cmd: any) => cmd.hash === txHash);
+      
+      if (tx) {
+        const blockHeight = parseInt(block.protocolState?.consensusState?.blockHeight || '0');
+        
+        // Check for failure reason safely
+        if (tx.failureReason) {
+          let reason = 'Unknown failure';
+          try {
+            if (Array.isArray(tx.failureReason.failures)) {
+              reason = tx.failureReason.failures.join(', ');
+            } else {
+              reason = JSON.stringify(tx.failureReason);
+            }
+          } catch (e) {
+            reason = 'Failed (parsing error)';
+          }
+          return { status: 'failed', failureReason: reason };
+        }
+        return { status: 'included', blockHeight };
       }
-      return { status: 'included', blockHeight: tx.blockHeight || 0 };
     }
     
-    // Not found in blocks yet - could be pending or in mempool
-    // Since we can't easily query mempool status via Minascan GraphQL,
-    // we'll return pending status
+    // Not found in mempool or recent blocks (likely still pending)
     return { status: 'pending' };
     
   } catch (error) {
-    console.log('[TransactionMonitor] Query error:', error);
+    console.warn('[TransactionMonitor] Query error:', error);
     return { status: 'unknown' };
   }
 }
@@ -128,7 +175,7 @@ async function queryLatestBlockHeight(): Promise<number | null> {
       body: JSON.stringify({
         query: `
           query {
-            blocks(query: {canonical: true}, sortBy: BLOCKHEIGHT_DESC, limit: 1) {
+            blocks(limit: 1, sortBy: BLOCKHEIGHT_DESC) {
               blockHeight
             }
           }
@@ -161,7 +208,7 @@ export async function monitorTransaction(
 ): Promise<MonitoringResult> {
   const maxWait = options?.maxWaitTime || MAX_WAIT_TIME_MS;
   const requiredConfirmations = options?.requiredConfirmations || 1;
-  const showToasts = callbacks?.showToasts !== false; // Default to true
+  const showToasts = callbacks?.showToasts !== false; 
   
   const startTime = Date.now();
   let currentStatus: TxStatus = 'pending';
@@ -171,10 +218,9 @@ export async function monitorTransaction(
   let effectiveMaxWait = maxWait;
   let toastId: string | undefined;
   
-  console.log(`[TransactionMonitor] Monitoring transaction: ${txHash}`);
+  console.log(`[TransactionMonitor] Monitoring: ${txHash}`);
   callbacks?.onStatusChange?.('pending', 'Starting transaction monitoring...');
   
-  // Show initial toast
   if (showToasts) {
     toastId = notify.tx.pending('Monitoring transaction...');
   }
@@ -189,7 +235,7 @@ export async function monitorTransaction(
       
       if (showToasts) {
         notify.dismiss(toastId);
-        notify.warning('Transaction monitoring timeout - it may still be processing');
+        notify.warning('Monitoring timeout - transaction may still be processing');
       }
       
       return {
@@ -218,18 +264,16 @@ export async function monitorTransaction(
           break;
           
         case 'in_mempool':
-          callbacks?.onStatusChange?.('in_mempool', 'Transaction in mempool, waiting for block...');
+          callbacks?.onStatusChange?.('in_mempool', 'Transaction in mempool, waiting for block inclusion...');
           break;
           
         case 'in_progress':
           inProgressCount++;
           callbacks?.onStatusChange?.('in_progress', `Proof verification in progress (${inProgressCount})...`);
           
-          // Add extra wait time for "in progress"
           if (!extraWaitAdded) {
             effectiveMaxWait += IN_PROGRESS_EXTRA_WAIT_MS;
             extraWaitAdded = true;
-            console.log(`[TransactionMonitor] Added extra wait time for in-progress state`);
           }
           break;
           
@@ -297,57 +341,7 @@ export async function monitorTransaction(
 }
 
 /**
- * Quick status check (single query, no waiting)
- */
-export async function checkTransactionStatus(txHash: string): Promise<TxStatus> {
-  const result = await queryTransactionStatus(txHash);
-  return result.status;
-}
-
-/**
- * Monitor multiple transactions
- */
-export async function monitorTransactions(
-  txHashes: string[],
-  callbacks?: {
-    onTransaction?: (hash: string, result: MonitoringResult) => void;
-    onAllComplete?: (results: Map<string, MonitoringResult>) => void;
-  }
-): Promise<Map<string, MonitoringResult>> {
-  const results = new Map<string, MonitoringResult>();
-  
-  // Monitor all in parallel
-  const promises = txHashes.map(async (hash) => {
-    const result = await monitorTransaction(hash);
-    results.set(hash, result);
-    callbacks?.onTransaction?.(hash, result);
-    return result;
-  });
-  
-  await Promise.all(promises);
-  callbacks?.onAllComplete?.(results);
-  
-  return results;
-}
-
-/**
- * Estimate time to confirmation based on network
- */
-export function estimateConfirmationTime(): {
-  minTime: number;
-  maxTime: number;
-  averageTime: number;
-} {
-  // Devnet block time is ~3 minutes
-  return {
-    minTime: 3 * 60 * 1000, // 3 minutes
-    maxTime: 10 * 60 * 1000, // 10 minutes
-    averageTime: 5 * 60 * 1000, // 5 minutes
-  };
-}
-
-/**
- * Get human-readable status message
+ * [FIX] Exported Helper: Get human-readable status message
  */
 export function getStatusMessage(status: TxStatus): string {
   const messages: Record<TxStatus, string> = {
@@ -360,11 +354,11 @@ export function getStatusMessage(status: TxStatus): string {
     failed: 'Transaction failed',
     timeout: 'Transaction monitoring timeout',
   };
-  return messages[status];
+  return messages[status] || status;
 }
 
 /**
- * Format time remaining
+ * [FIX] Exported Helper: Format time remaining
  */
 export function formatTimeRemaining(ms: number): string {
   const seconds = Math.floor(ms / 1000);
@@ -375,4 +369,16 @@ export function formatTimeRemaining(ms: number): string {
     return `${minutes}m ${remainingSeconds}s`;
   }
   return `${seconds}s`;
+}
+
+export function estimateConfirmationTime(): {
+  minTime: number;
+  maxTime: number;
+  averageTime: number;
+} {
+  return {
+    minTime: 3 * 60 * 1000, 
+    maxTime: 10 * 60 * 1000, 
+    averageTime: 5 * 60 * 1000, 
+  };
 }

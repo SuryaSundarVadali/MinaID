@@ -36,8 +36,8 @@ export const api = {
   async setActiveInstanceToBerkeley() {
     state.progressCallback?.('INITIALIZING', 5, 'Connecting to Berkeley network');
     const Network = Mina.Network({
-      mina: "https://api.minascan.io/node/berkeley/v1/graphql",
-      archive: "https://api.minascan.io/archive/berkeley/v1/graphql"
+      mina: "https://api.minascan.io/node/devnet/v1/graphql",
+      archive: "https://api.minascan.io/archive/devnet/v1/graphql"
     });
     console.log("Berkeley testnet network instance configured");
     Mina.setActiveInstance(Network);
@@ -62,48 +62,98 @@ export const api = {
   },
 
   async compileAgeVerificationProgram() {
-    state.progressCallback?.('COMPILING_CIRCUIT', 20, 'Compiling AgeVerificationProgram');
-    console.log("Compiling AgeVerificationProgram from scratch...");
-    const result = await state.AgeVerificationProgramInstance.compile();
-    state.progressCallback?.('COMPILING_CIRCUIT', 40, 'AgeVerificationProgram compiled');
-    console.log("AgeVerificationProgram compiled, vk:", result.verificationKey.hash.toString().slice(0, 10) + '...');
+    try {
+      state.progressCallback?.('COMPILING_CIRCUIT', 20, 'Compiling AgeVerificationProgram');
+      console.log("Compiling AgeVerificationProgram from scratch...");
+      
+      const result = await state.AgeVerificationProgramInstance.compile();
+      
+      state.progressCallback?.('COMPILING_CIRCUIT', 40, 'AgeVerificationProgram compiled');
+      console.log("AgeVerificationProgram compiled, vk:", result.verificationKey.hash.toString().slice(0, 10) + '...');
+      
+      return result;
+    } catch (error: any) {
+      console.error("❌ AgeVerificationProgram compilation failed:", error);
+      state.progressCallback?.('ERROR', 0, `Compilation failed: ${error.message}`);
+      
+      if (error.message?.includes('memory')) {
+        throw new Error('Out of memory during compilation. Try closing other tabs and reloading.');
+      } else {
+        throw new Error(`Compilation failed: ${error.message || 'Unknown error'}`);
+      }
+    }
   },
 
   async compileDIDRegistry() {
-    state.progressCallback?.('FETCHING_KEYS', 15, 'Preloading cache files');
-    console.log("Compiling DIDRegistry...");
-    
-    // Preload critical cache files for registerDIDSimple method
-    console.log("[Cache] Preloading cache for registerDIDSimple...");
-    await state.cacheLoader.preloadForMethod('didregistry', 'registerdidsimple');
-    
-    // Create o1js Cache that uses Merkle-cached files
-    const cache = Cache.FileSystemDefault;
-    state.cache = cache;
-    
-    state.progressCallback?.('COMPILING_CIRCUIT', 30, 'Compiling DIDRegistry');
-    console.log("Compiling DIDRegistry with cached files...");
-    const result = await state.DIDRegistryInstance.compile({ cache });
-    state.progressCallback?.('COMPILING_CIRCUIT', 45, 'DIDRegistry compiled');
-    console.log("✅ DIDRegistry compiled, vk:", result.verificationKey.hash.toString().slice(0, 10) + '...');
+    try {
+      state.progressCallback?.('FETCHING_KEYS', 15, 'Preloading cache files');
+      console.log("Compiling DIDRegistry...");
+      
+      // Preload critical cache files for registerDIDSimple method
+      console.log("[Cache] Preloading cache for registerDIDSimple...");
+      await state.cacheLoader.preloadForMethod('didregistry', 'registerdidsimple');
+      
+      // Create o1js Cache that uses Merkle-cached files
+      const cache = Cache.FileSystemDefault;
+      state.cache = cache;
+      
+      state.progressCallback?.('COMPILING_CIRCUIT', 30, 'Compiling DIDRegistry');
+      console.log("Compiling DIDRegistry with cached files...");
+      
+      const result = await state.DIDRegistryInstance.compile({ cache });
+      
+      state.progressCallback?.('COMPILING_CIRCUIT', 45, 'DIDRegistry compiled');
+      console.log("✅ DIDRegistry compiled, vk:", result.verificationKey.hash.toString().slice(0, 10) + '...');
+      
+      return result;
+    } catch (error: any) {
+      console.error("❌ DIDRegistry compilation failed:", error);
+      state.progressCallback?.('ERROR', 0, `Compilation failed: ${error.message}`);
+      
+      // Provide helpful error context
+      if (error.message?.includes('version') || error.message?.includes('cache')) {
+        throw new Error('Cache version mismatch detected. Please reset cache and try again.');
+      } else if (error.message?.includes('memory')) {
+        throw new Error('Out of memory. Try closing other tabs and reloading.');
+      } else {
+        throw new Error(`Compilation failed: ${error.message || 'Unknown error'}`);
+      }
+    }
   },
 
   async compileZKPVerifier() {
-    state.progressCallback?.('FETCHING_KEYS', 15, 'Preloading cache files');
-    console.log("Compiling ZKPVerifier...");
-    
-    // Preload cache for verifyAgeProof method
-    console.log("[Cache] Preloading cache for verifyAgeProof...");
-    await state.cacheLoader.preloadForMethod('zkpverifier', 'verifyageproof');
-    
-    const cache = Cache.FileSystemDefault;
-    state.cache = cache;
-    
-    state.progressCallback?.('COMPILING_CIRCUIT', 30, 'Compiling ZKPVerifier');
-    console.log("Compiling ZKPVerifier with cached files...");
-    const result = await state.ZKPVerifierInstance.compile({ cache });
-    state.progressCallback?.('COMPILING_CIRCUIT', 45, 'ZKPVerifier compiled');
-    console.log("✅ ZKPVerifier compiled, vk:", result.verificationKey.hash.toString().slice(0, 10) + '...');
+    try {
+      state.progressCallback?.('FETCHING_KEYS', 15, 'Preloading cache files');
+      console.log("Compiling ZKPVerifier...");
+      
+      // Preload cache for verifyAgeProof method
+      console.log("[Cache] Preloading cache for verifyAgeProof...");
+      await state.cacheLoader.preloadForMethod('zkpverifier', 'verifyageproof');
+      
+      const cache = Cache.FileSystemDefault;
+      state.cache = cache;
+      
+      state.progressCallback?.('COMPILING_CIRCUIT', 30, 'Compiling ZKPVerifier');
+      console.log("Compiling ZKPVerifier with cached files...");
+      
+      const result = await state.ZKPVerifierInstance.compile({ cache });
+      
+      state.progressCallback?.('COMPILING_CIRCUIT', 45, 'ZKPVerifier compiled');
+      console.log("✅ ZKPVerifier compiled, vk:", result.verificationKey.hash.toString().slice(0, 10) + '...');
+      
+      return result;
+    } catch (error: any) {
+      console.error("❌ ZKPVerifier compilation failed:", error);
+      state.progressCallback?.('ERROR', 0, `Compilation failed: ${error.message}`);
+      
+      if (error.message?.includes('version') || error.message?.includes('cache')) {
+        throw new Error('Cache version mismatch detected. Please reset cache and try again.');
+      } else if (error.message?.includes('memory')) {
+        throw new Error('Out of memory. Try closing other tabs and reloading.');
+      } else {
+        throw new Error(`Compilation failed: ${error.message || 'Unknown error'}`);
+      }
+    }
   },
 
   async fetchAccount(publicKey58: string) {

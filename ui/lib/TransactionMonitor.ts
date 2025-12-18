@@ -34,11 +34,11 @@ export interface MonitorConfig {
 }
 
 const DEFAULT_CONFIG: Required<Omit<MonitorConfig, 'onStatusChange'>> = {
-  maxAttempts: 10,
-  initialDelay: 200000,      // 200 seconds
-  maxDelay: 1000000,         // 1000 seconds
-  backoffMultiplier: 1.5,
-  timeout: 600000          // 10 minutes total timeout
+  maxAttempts: 360,          // 360 attempts
+  initialDelay: 5000,        // 5 seconds
+  maxDelay: 10000,           // 10 seconds max
+  backoffMultiplier: 1.1,
+  timeout: 1800000           // 30 minutes total timeout
 };
 
 export class TransactionMonitor {
@@ -181,11 +181,12 @@ export async function checkMinaTransaction(
       }
     }
 
-    // Fallback: Use GraphQL if Blockberry doesn't have it yet
-    const query = `
-      query GetTransactionStatus($hash: String!) {
-        transactionStatus(zkappTransaction: $hash)
+    // Fallback: Use GraphQL Archive Node
+    // First check if transaction is in mempool
+    const mempoolQuery = `
+      query CheckMempool($hash: String!) {
         pooledZkappCommands(hashes: [$hash]) {
+          hash
           failureReason
         }
       }
@@ -195,38 +196,91 @@ export async function checkMinaTransaction(
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
+        query: mempoolQuery,
+        variables: { hash: txHash }
+      })
+    });
+
+    const mempoolData = await response.json();
+    
+    if (mempoolData.data?.pooledZkappCommands?.length > 0) {
+      const pooledCmd = mempoolData.data.pooledZkappCommands[0];
+      if (pooledCmd.failureReason) {
+        return { included: false, failed: true, error: JSON.stringify(pooledCmd.failureReason) };
+      }
+      // In mempool, still pending
+      return { included: false };
+    }
+
+    // If not in mempool, check if included in a block using bestChain
+    const query = `
+      query GetTransaction($hash: String!) {
+        bestChain(maxLength: 290) {
+          protocolState {
+            consensusState {
+              blockHeight
+            }
+          }
+          transactions {
+            zkappCommands {
+              hash
+              failureReason {
+                failures
+                index
+              }
+            }
+          }
+        }
+      }
+    `;
+
+    const chainResponse = await fetch(graphqlEndpoint, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
         query,
         variables: { hash: txHash }
       })
     });
 
-    const data = await response.json();
+    const data = await chainResponse.json();
     
     if (data.errors) {
       console.warn('[checkMinaTransaction] GraphQL errors:', data.errors);
-      // Transaction might not be indexed yet
       return { included: false };
     }
     
-    const status = data?.data?.transactionStatus;
-    const pooledCommands = data?.data?.pooledZkappCommands || [];
-    const pooledCommand = pooledCommands.length > 0 ? pooledCommands[0] : null;
-
-    // Check for failure in pooled commands
-    if (pooledCommand && pooledCommand.failureReason) {
-       // If there's a failure reason, it failed
-       return { included: false, failed: true, error: JSON.stringify(pooledCommand.failureReason) };
-    }
-
-    if (status === 'INCLUDED') {
-      return { included: true };
+    const blocks = data?.data?.bestChain || [];
+    
+    // Search through recent blocks for our transaction
+    for (const block of blocks) {
+      const zkappCommands = block.transactions?.zkappCommands || [];
+      const tx = zkappCommands.find((cmd: any) => cmd.hash === txHash);
+      
+      if (tx) {
+        const blockHeight = parseInt(block.protocolState?.consensusState?.blockHeight || '0');
+    
+        // Check for failure reason
+        if (tx.failureReason) {
+          let reason = 'Unknown failure';
+          try {
+            if (Array.isArray(tx.failureReason.failures)) {
+              reason = tx.failureReason.failures.join(', ');
+            } else {
+              reason = JSON.stringify(tx.failureReason);
+            }
+          } catch (e) {
+            reason = 'Failed (parsing error)';
+          }
+          return { included: false, failed: true, error: reason };
+        }
+        
+        // Transaction found and no failure - it's included!
+        return { included: true };
+      }
     }
     
-    if (status === 'FAILED') {
-       return { included: false, failed: true, error: 'Transaction status is FAILED' };
-    }
-
-    // PENDING or UNKNOWN
+    // Not found in recent blocks - still pending
     return { included: false };
   } catch (error) {
     console.warn('[checkMinaTransaction] Error:', error);
