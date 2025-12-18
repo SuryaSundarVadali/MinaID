@@ -7,6 +7,8 @@ import {
   PublicKey,
   Poseidon,
   Struct,
+  MerkleMap,
+  MerkleMapWitness,
 } from 'o1js';
 
 import { AgeProof, AgeProofPublicInput } from './AgeVerificationProgram.js';
@@ -88,8 +90,9 @@ export class ZKPVerifierV2 extends SmartContract {
   init() {
     super.init();
     
-    // Initialize empty trusted issuers root
-    this.trustedIssuersRoot.set(Field(0));
+    // Initialize with empty Merkle Map root
+    const emptyMapRoot = new MerkleMap().getRoot();
+    this.trustedIssuersRoot.set(emptyMapRoot);
     
     // Initialize counters
     this.totalVerifications.set(Field(0));
@@ -234,17 +237,34 @@ export class ZKPVerifierV2 extends SmartContract {
    * Add Trusted Issuer
    * 
    * Only contract owner can add trusted issuers.
+   * Uses a Merkle Map to efficiently store and verify trusted issuers.
    * 
    * @param issuer - Public key of the issuer to trust
+   * @param witness - Merkle witness proving the current state of the map
    */
   @method
-  async addTrustedIssuer(issuer: PublicKey) {
+  async addTrustedIssuer(issuer: PublicKey, witness: MerkleMapWitness) {
     // Verify sender is owner
     const owner = this.owner.getAndRequireEquals();
     this.sender.getAndRequireSignature().assertEquals(owner);
 
-    // TODO: Implement Merkle tree update for trusted issuers
-    // For now, emit event
+    // Get current Merkle Map root from on-chain state
+    const currentRoot = this.trustedIssuersRoot.getAndRequireEquals();
+
+    // Generate key from issuer's public key for Merkle Map
+    const key = Poseidon.hash(issuer.toFields());
+
+    // Verify the witness is valid for current root with value 0 (empty slot)
+    // This proves that the issuer is not already in the trusted list
+    const [witnessRoot, witnessKey] = witness.computeRootAndKey(Field(0));
+    currentRoot.assertEquals(witnessRoot, 'Invalid Merkle witness or issuer already trusted');
+    key.assertEquals(witnessKey, 'Key mismatch in witness');
+
+    // Update the Merkle Map with the new trusted issuer (value = 1 means trusted)
+    const [newRoot] = witness.computeRootAndKey(Field(1));
+    this.trustedIssuersRoot.set(newRoot);
+
+    // Emit event
     this.emitEvent('IssuerAdded', new IssuerAddedEvent({
       issuerX: issuer.x,
       timestamp: this.network.blockchainLength.getAndRequireEquals().value,
