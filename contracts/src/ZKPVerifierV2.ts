@@ -39,6 +39,11 @@ class OwnershipTransferredEvent extends Struct({
   newOwnerX: Field,
 }) {}
 
+class UidaiIssuerUpdatedEvent extends Struct({
+  oldIssuerX: Field,
+  newIssuerX: Field,
+}) {}
+
 /**
  * ZKPVerifier V2 Smart Contract
  * 
@@ -68,6 +73,7 @@ export class ZKPVerifierV2 extends SmartContract {
     IssuerAdded: IssuerAddedEvent,
     MinimumAgeUpdated: MinimumAgeUpdatedEvent,
     OwnershipTransferred: OwnershipTransferredEvent,
+    UidaiIssuerUpdated: UidaiIssuerUpdatedEvent,
   };
 
   // Root hash of trusted issuers (using Merkle tree for scalability)
@@ -81,6 +87,9 @@ export class ZKPVerifierV2 extends SmartContract {
 
   // Minimum age requirement for age verification
   @state(Field) minimumAge = State<Field>();
+
+  // UIDAI Aadhar government issuer (trusted authority for credentials)
+  @state(PublicKey) uidaiIssuer = State<PublicKey>();
 
   /**
    * Initialize the contract
@@ -99,6 +108,9 @@ export class ZKPVerifierV2 extends SmartContract {
     
     // Set contract deployer as owner
     this.owner.set(this.sender.getAndRequireSignature());
+    
+    // UIDAI issuer will be set by owner after deployment
+    this.uidaiIssuer.set(PublicKey.empty());
   }
 
   /**
@@ -123,6 +135,16 @@ export class ZKPVerifierV2 extends SmartContract {
     const subject = publicInput.subjectPublicKey;
     const minAge = publicInput.minimumAge;
     const timestamp = publicInput.timestamp;
+    const issuer = publicInput.issuerPublicKey;
+
+    // Security check: Prover cannot be the verifier
+    const sender = this.sender.getAndRequireSignature();
+    const isSamePerson = sender.equals(subject);
+    isSamePerson.assertFalse();
+
+    // Security check: Issuer must be the trusted UIDAI Aadhar authority
+    const trustedIssuer = this.uidaiIssuer.getAndRequireEquals();
+    issuer.equals(trustedIssuer).assertTrue();
 
     // Get contract's minimum age requirement
     const contractMinAge = this.minimumAge.getAndRequireEquals();
@@ -162,6 +184,15 @@ export class ZKPVerifierV2 extends SmartContract {
     issuerPublicKey: PublicKey,
     timestamp: Field
   ) {
+    // Security check: Prover cannot be the verifier
+    const sender = this.sender.getAndRequireSignature();
+    const isSamePerson = sender.equals(subject);
+    isSamePerson.assertFalse();
+
+    // Security check: Issuer must be the trusted UIDAI Aadhar authority
+    const trustedIssuer = this.uidaiIssuer.getAndRequireEquals();
+    issuerPublicKey.equals(trustedIssuer).assertTrue();
+
     // Get minimum age requirement
     const minAge = this.minimumAge.getAndRequireEquals();
 
@@ -207,6 +238,15 @@ export class ZKPVerifierV2 extends SmartContract {
     commitment: Field,
     issuerPublicKey: PublicKey
   ) {
+    // Security check: Prover cannot be the verifier
+    const sender = this.sender.getAndRequireSignature();
+    const isSamePerson = sender.equals(subject);
+    isSamePerson.assertFalse();
+
+    // Security check: Issuer must be the trusted UIDAI Aadhar authority
+    const trustedIssuer = this.uidaiIssuer.getAndRequireEquals();
+    issuerPublicKey.equals(trustedIssuer).assertTrue();
+
     // Create commitment that should match the proof
     const expectedCommitment = Poseidon.hash([
       kycHash,
@@ -318,5 +358,42 @@ export class ZKPVerifierV2 extends SmartContract {
   @method.returns(Field)
   async getMinimumAge(): Promise<Field> {
     return this.minimumAge.getAndRequireEquals();
+  }
+
+  /**
+   * Set UIDAI Issuer
+   * 
+   * Sets the trusted UIDAI Aadhar government authority public key.
+   * Only the contract owner can call this method.
+   * 
+   * @param newUidaiIssuer - Public key of the UIDAI Aadhar authority
+   */
+  @method
+  async setUidaiIssuer(newUidaiIssuer: PublicKey) {
+    // Verify sender is owner
+    const owner = this.owner.getAndRequireEquals();
+    this.sender.getAndRequireSignature().assertEquals(owner);
+
+    // Get old issuer for event
+    const oldIssuer = this.uidaiIssuer.getAndRequireEquals();
+
+    // Update UIDAI issuer
+    this.uidaiIssuer.set(newUidaiIssuer);
+
+    // Emit event
+    this.emitEvent('UidaiIssuerUpdated', new UidaiIssuerUpdatedEvent({
+      oldIssuerX: oldIssuer.x,
+      newIssuerX: newUidaiIssuer.x,
+    }));
+  }
+
+  /**
+   * Get UIDAI Issuer
+   * 
+   * Returns the current trusted UIDAI issuer public key.
+   */
+  @method.returns(PublicKey)
+  async getUidaiIssuer(): Promise<PublicKey> {
+    return this.uidaiIssuer.getAndRequireEquals();
   }
 }

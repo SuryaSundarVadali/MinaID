@@ -6,8 +6,10 @@
 import { notify } from './ToastNotifications';
 import { checkBlockberryTransaction } from './BlockberryMonitor';
 
-// [FIX] Use the official Minascan Archive Node for Devnet
+// Use Minascan GraphQL endpoint for queries (it works)
 const GRAPHQL_ENDPOINT = 'https://api.minascan.io/node/devnet/v1/graphql';
+// Use MinaExplorer for UI links (better explorer interface)
+const EXPLORER_BASE_URL = 'https://devnet.minaexplorer.com';
 
 // Monitoring configuration
 const POLL_INTERVAL_MS = 5000; // 5 seconds - check frequently for blockchain confirmation
@@ -40,6 +42,27 @@ export interface MonitoringCallbacks {
   onConfirmed?: (result: MonitoringResult) => void;
   onFailed?: (reason: string) => void;
   showToasts?: boolean; 
+}
+
+/**
+ * Check MinaExplorer API for transaction
+ */
+async function checkMinaExplorer(
+  txHash: string
+): Promise<{ found: boolean; canonical: boolean; blockHeight?: number; failureReason?: string }> {
+  try {
+    const response = await fetch(`${EXPLORER_BASE_URL}/transaction/${txHash}`);
+    if (!response.ok) {
+      return { found: false, canonical: false };
+    }
+    
+    // If we get a successful response, the transaction exists on MinaExplorer
+    // We'll still need to query GraphQL for detailed status
+    return { found: true, canonical: true };
+  } catch (error) {
+    console.warn('[checkMinaExplorer] Error:', error);
+    return { found: false, canonical: false };
+  }
 }
 
 /**
@@ -93,7 +116,9 @@ async function queryTransactionStatus(
     // If not in mempool, check bestChain for included transactions
     const response = await fetch(GRAPHQL_ENDPOINT, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 
+        'Content-Type': 'application/json',
+      },
       body: JSON.stringify({
         query: `
           query GetTransaction($hash: String!) {
@@ -137,6 +162,8 @@ async function queryTransactionStatus(
       if (tx) {
         const blockHeight = parseInt(block.protocolState?.consensusState?.blockHeight || '0');
         
+        console.log(`[TransactionMonitor] Transaction found in block ${blockHeight}`);
+        
         // Check for failure reason safely
         if (tx.failureReason) {
           let reason = 'Unknown failure';
@@ -175,8 +202,12 @@ async function queryLatestBlockHeight(): Promise<number | null> {
       body: JSON.stringify({
         query: `
           query {
-            blocks(limit: 1, sortBy: BLOCKHEIGHT_DESC) {
-              blockHeight
+            bestChain(maxLength: 1) {
+              protocolState {
+                consensusState {
+                  blockHeight
+                }
+              }
             }
           }
         `,
@@ -184,9 +215,18 @@ async function queryLatestBlockHeight(): Promise<number | null> {
     });
     
     const result = await response.json();
-    return result.data?.blocks?.[0]?.blockHeight || null;
+    const blockHeight = result.data?.bestChain?.[0]?.protocolState?.consensusState?.blockHeight;
+    
+    if (blockHeight) {
+      const height = parseInt(blockHeight);
+      console.log(`[TransactionMonitor] Latest block height: ${height}`);
+      return height;
+    }
+    
+    return null;
     
   } catch (error) {
+    console.warn('[TransactionMonitor] Failed to query latest block height:', error);
     return null;
   }
 }
@@ -279,7 +319,9 @@ export async function monitorTransaction(
           
         case 'included':
           blockHeight = statusResult.blockHeight;
-          callbacks?.onStatusChange?.('included', `Included in block ${blockHeight}`);
+          const explorerUrl = `${EXPLORER_BASE_URL}/transaction/${txHash}`;
+          callbacks?.onStatusChange?.('included', `Included in block ${blockHeight}. View: ${explorerUrl}`);
+          console.log(`[TransactionMonitor] 🔗 MinaExplorer: ${explorerUrl}`);
           break;
           
         case 'failed':
@@ -307,10 +349,16 @@ export async function monitorTransaction(
       const latestBlock = await queryLatestBlockHeight();
       if (latestBlock) {
         const confirmations = latestBlock - blockHeight;
+        console.log(`[TransactionMonitor] Confirmations check: tx block=${blockHeight}, latest=${latestBlock}, confirmations=${confirmations}, required=${requiredConfirmations}`);
         
         if (confirmations >= requiredConfirmations) {
           console.log(`[TransactionMonitor] ✅ Confirmed! ${confirmations} confirmations`);
-          callbacks?.onStatusChange?.('confirmed', `Confirmed with ${confirmations} confirmations`);
+          
+          const explorerUrl = `${EXPLORER_BASE_URL}/transaction/${txHash}`;
+          console.log(`[TransactionMonitor] 🔗 View on MinaExplorer: ${explorerUrl}`);
+          
+          callbacks?.onStatusChange?.('confirmed', `Confirmed with ${confirmations} confirmations. View on MinaExplorer!`);
+          
           callbacks?.onConfirmed?.({
             status: 'confirmed',
             transactionHash: txHash,

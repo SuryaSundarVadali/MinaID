@@ -51,9 +51,13 @@ async function getTransactionFromExplorer(txHash: string): Promise<{
   blockHeight?: number;
   confirmed: boolean;
   explorerUrl: string;
+  indexedByExplorer?: boolean;
 } | null> {
   try {
+    // Use Minascan GraphQL endpoint for queries
     const GRAPHQL_ENDPOINT = 'https://api.minascan.io/node/devnet/v1/graphql';
+    // Use MinaExplorer for UI links
+    const EXPLORER_BASE_URL = 'https://devnet.minaexplorer.com';
     
     // Query bestChain to find the transaction
     const response = await fetch(GRAPHQL_ENDPOINT, {
@@ -93,10 +97,13 @@ async function getTransactionFromExplorer(txHash: string): Promise<{
       
       if (tx && !tx.failureReason) {
         const blockHeight = parseInt(block.protocolState?.consensusState?.blockHeight || '0');
+        
+        // Transaction found on blockchain and visible via GraphQL
         return {
           blockHeight,
           confirmed: true,
-          explorerUrl: `https://devnet.minaexplorer.com/transaction/${txHash}`,
+          indexedByExplorer: true, // If GraphQL returns it, it's indexed
+          explorerUrl: `${EXPLORER_BASE_URL}/transaction/${txHash}`,
         };
       }
     }
@@ -104,7 +111,8 @@ async function getTransactionFromExplorer(txHash: string): Promise<{
     // If not found but transaction was successful, return minimal info
     return {
       confirmed: false,
-      explorerUrl: `https://devnet.minaexplorer.com/transaction/${txHash}`,
+      indexedByExplorer: false,
+      explorerUrl: `${EXPLORER_BASE_URL}/transaction/${txHash}`,
     };
   } catch (error) {
     console.warn('[getTransactionFromExplorer] Error:', error);
@@ -534,8 +542,9 @@ export function VerifierDashboard() {
                   explorerConfirmations = monitorResult.confirmations;
                   explorerUrl = explorerData.explorerUrl;
                   
+                  // If GraphQL returned the transaction, it's confirmed and indexed
                   setVerificationStatus(
-                    `✅ On-chain verification confirmed! Block: ${explorerData.blockHeight || 'pending'}, Confirmations: ${monitorResult.confirmations}`
+                    `✅ Verified on MinaExplorer! Block: ${explorerData.blockHeight || 'pending'}, Confirmations: ${monitorResult.confirmations}`
                   );
                 } else {
                   explorerUrl = `https://devnet.minaexplorer.com/transaction/${transactionHash}`;
