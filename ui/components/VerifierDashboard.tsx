@@ -133,6 +133,11 @@ export function VerifierDashboard() {
   const [expectedCitizenship, setExpectedCitizenship] = useState('');
   const [history, setHistory] = useState<any[]>([]);
   
+  // IPFS state
+  const [uploadMode, setUploadMode] = useState<'file' | 'ipfs'>('file');
+  const [ipfsCID, setIpfsCID] = useState('');
+  const [isLoadingFromIPFS, setIsLoadingFromIPFS] = useState(false);
+  
   // On-chain verification state
   const [verificationProgress, setVerificationProgress] = useState(0);
   const [verificationStatus, setVerificationStatus] = useState('');
@@ -153,6 +158,49 @@ export function VerifierDashboard() {
     sessionStorage.removeItem('minaid_passkey_verified');
     logout();
     router.push('/');
+  };
+
+  const handleLoadFromIPFS = async () => {
+    if (!ipfsCID.trim()) {
+      setError('Please enter a CID');
+      return;
+    }
+
+    setIsLoadingFromIPFS(true);
+    setError('');
+    setVerificationResult(null);
+
+    try {
+      const { getIPFSService } = await import('../lib/IPFSService');
+      const { generatePassphrase } = await import('../lib/IPFSCrypto');
+      
+      const ipfsService = getIPFSService();
+      
+      // Prompt for wallet address (should be shared with CID)
+      const walletAddress = prompt('Enter the wallet address that uploaded this proof:');
+      if (!walletAddress) {
+        throw new Error('Wallet address is required to decrypt the proof');
+      }
+      
+      const passphrase = generatePassphrase(walletAddress, 'minaid-proof');
+      
+      const result = await ipfsService.downloadDecrypted(ipfsCID.trim(), passphrase);
+      
+      if (!result.data) {
+        throw new Error('No data received from IPFS');
+      }
+
+      setProofData(result.data);
+      setProofFile(null); // Clear file since we loaded from IPFS
+      
+      alert(`✅ Proof loaded from IPFS successfully!`);
+      
+    } catch (error: any) {
+      console.error('[VerifierDashboard] IPFS load failed:', error);
+      setError(`Failed to load from IPFS: ${error.message}`);
+    } finally {
+      setIsLoadingFromIPFS(false);
+    }
   };
 
   const handleFileUpload = (event: React.ChangeEvent<HTMLInputElement>) => {
@@ -653,19 +701,106 @@ export function VerifierDashboard() {
         <div style={{ background: 'rgba(255,255,255,0.95)', borderRadius: '4px', border: '1px solid #2d2d2d', padding: '2rem', width: '100%', maxWidth: '600px', marginTop: '2rem' }}>
           {!verificationResult ? (
             <>
+              {/* Upload Mode Selector */}
               <div style={{ marginBottom: '1.5rem' }}>
-                <label style={{ fontFamily: 'var(--font-monument-bold)', fontSize: '0.875rem', marginBottom: '0.5rem', display: 'block' }}>UPLOAD PROOF FILE</label>
-                <div style={{ border: '2px dashed #ccc', borderRadius: '4px', padding: '2rem', textAlign: 'center', cursor: 'pointer', background: proofFile ? '#e8f5e9' : '#fafafa' }}>
-                  <input type="file" accept=".json" onChange={handleFileUpload} style={{ display: 'none' }} id="proof-file" />
-                  <label htmlFor="proof-file" style={{ cursor: 'pointer' }}>
-                    {proofFile ? (
-                      <><span style={{ fontSize: '2rem' }}>✓</span><p style={{ fontFamily: 'var(--font-monument)', marginTop: '0.5rem' }}>{proofFile.name}</p></>
-                    ) : (
-                      <><span style={{ fontSize: '2rem' }}>📄</span><p style={{ fontFamily: 'var(--font-monument)', marginTop: '0.5rem' }}>Click to upload JSON proof</p></>
-                    )}
-                  </label>
+                <div style={{ display: 'flex', gap: '0.5rem', background: '#f5f5f5', padding: '0.5rem', borderRadius: '8px' }}>
+                  <button
+                    onClick={() => setUploadMode('file')}
+                    style={{
+                      flex: 1,
+                      padding: '0.75rem',
+                      border: 'none',
+                      borderRadius: '6px',
+                      background: uploadMode === 'file' ? 'white' : 'transparent',
+                      boxShadow: uploadMode === 'file' ? '0 2px 4px rgba(0,0,0,0.1)' : 'none',
+                      cursor: 'pointer',
+                      fontFamily: 'var(--font-monument)',
+                      fontSize: '0.875rem',
+                      transition: 'all 0.2s'
+                    }}
+                  >
+                    📁 From Device
+                  </button>
+                  <button
+                    onClick={() => setUploadMode('ipfs')}
+                    style={{
+                      flex: 1,
+                      padding: '0.75rem',
+                      border: 'none',
+                      borderRadius: '6px',
+                      background: uploadMode === 'ipfs' ? 'white' : 'transparent',
+                      boxShadow: uploadMode === 'ipfs' ? '0 2px 4px rgba(0,0,0,0.1)' : 'none',
+                      cursor: 'pointer',
+                      fontFamily: 'var(--font-monument)',
+                      fontSize: '0.875rem',
+                      transition: 'all 0.2s'
+                    }}
+                  >
+                    ☁️ From IPFS
+                  </button>
                 </div>
               </div>
+
+              {/* File Upload Mode */}
+              {uploadMode === 'file' && (
+                <div style={{ marginBottom: '1.5rem' }}>
+                  <label style={{ fontFamily: 'var(--font-monument-bold)', fontSize: '0.875rem', marginBottom: '0.5rem', display: 'block' }}>UPLOAD PROOF FILE</label>
+                  <div style={{ border: '2px dashed #ccc', borderRadius: '4px', padding: '2rem', textAlign: 'center', cursor: 'pointer', background: proofFile ? '#e8f5e9' : '#fafafa' }}>
+                    <input type="file" accept=".json" onChange={handleFileUpload} style={{ display: 'none' }} id="proof-file" />
+                    <label htmlFor="proof-file" style={{ cursor: 'pointer' }}>
+                      {proofFile ? (
+                        <><span style={{ fontSize: '2rem' }}>✓</span><p style={{ fontFamily: 'var(--font-monument)', marginTop: '0.5rem' }}>{proofFile.name}</p></>
+                      ) : (
+                        <><span style={{ fontSize: '2rem' }}>📄</span><p style={{ fontFamily: 'var(--font-monument)', marginTop: '0.5rem' }}>Click to upload JSON proof</p></>
+                      )}
+                    </label>
+                  </div>
+                </div>
+              )}
+
+              {/* IPFS Load Mode */}
+              {uploadMode === 'ipfs' && (
+                <div style={{ marginBottom: '1.5rem' }}>
+                  <label style={{ fontFamily: 'var(--font-monument-bold)', fontSize: '0.875rem', marginBottom: '0.5rem', display: 'block' }}>LOAD FROM IPFS</label>
+                  <div style={{ background: '#f0f9ff', border: '1px solid #bfdbfe', borderRadius: '4px', padding: '1rem', marginBottom: '1rem' }}>
+                    <p style={{ fontSize: '0.875rem', color: '#1e40af' }}>
+                      Enter the IPFS CID shared by the proof generator. You'll need their wallet address to decrypt the proof.
+                    </p>
+                  </div>
+                  <input
+                    type="text"
+                    value={ipfsCID}
+                    onChange={(e) => setIpfsCID(e.target.value)}
+                    placeholder="QmXxx..."
+                    style={{ 
+                      width: '100%', 
+                      padding: '0.75rem', 
+                      border: '1px solid #ccc', 
+                      borderRadius: '4px', 
+                      marginBottom: '0.5rem',
+                      fontFamily: 'monospace'
+                    }}
+                  />
+                  <button
+                    onClick={handleLoadFromIPFS}
+                    disabled={!ipfsCID.trim() || isLoadingFromIPFS}
+                    style={{
+                      width: '100%',
+                      padding: '0.75rem',
+                      border: 'none',
+                      borderRadius: '4px',
+                      background: (!ipfsCID.trim() || isLoadingFromIPFS) ? '#ccc' : '#3b82f6',
+                      color: 'white',
+                      cursor: (!ipfsCID.trim() || isLoadingFromIPFS) ? 'not-allowed' : 'pointer',
+                      fontFamily: 'var(--font-monument)',
+                      fontSize: '0.875rem',
+                      transition: 'all 0.2s'
+                    }}
+                  >
+                    {isLoadingFromIPFS ? '⏳ Loading from IPFS...' : '📥 Load Proof from IPFS'}
+                  </button>
+                </div>
+              )}
 
               {proofData && (
                 <div style={{ background: '#f5f5f5', borderRadius: '4px', padding: '1rem', marginBottom: '1.5rem' }}>

@@ -85,13 +85,40 @@ export function IPFSDownloader({
       console.error('[IPFSDownloader] Download failed:', error);
       const errorMessage = (error as Error).message || 'Download failed';
       
-      setError(errorMessage);
-      toast.error(
-        <div>
-          <div className="font-bold">Download Failed</div>
-          <div className="text-sm mt-1">{errorMessage}</div>
-        </div>
-      );
+      // Check if it's an IPFS Desktop upload
+      if (errorMessage.includes('IPFS_DESKTOP_UPLOAD')) {
+        const cleanMessage = errorMessage.replace('IPFS_DESKTOP_UPLOAD: ', '');
+        setError(cleanMessage);
+        toast.error(
+          <div>
+            <div className="font-bold">⚠️ Unencrypted IPFS Data</div>
+            <div className="text-sm mt-1 whitespace-pre-line">{cleanMessage}</div>
+            <div className="text-sm mt-2 font-semibold">
+              Try using "Import from IPFS Desktop" mode
+            </div>
+          </div>,
+          { duration: 8000 }
+        );
+      } else {
+        // Add helpful tips based on error type
+        let displayMessage = errorMessage;
+        if (errorMessage.includes('error page')) {
+          displayMessage += '\n\n💡 Tip: Make sure you copied the complete CID from a valid upload.';
+        } else if (errorMessage.includes('not in the expected format')) {
+          displayMessage += '\n\n💡 Tip: This CID may contain unencrypted data. Only CIDs from MinaID\'s encrypted uploads can be decrypted.';
+        } else if (errorMessage.includes('missing required encryption fields')) {
+          displayMessage += '\n\n💡 Tip: Use the "Save to IPFS" feature in the upload page to create encrypted uploads.';
+        }
+        
+        setError(displayMessage);
+        toast.error(
+          <div>
+            <div className="font-bold">Download Failed</div>
+            <div className="text-sm mt-1 whitespace-pre-line">{displayMessage}</div>
+          </div>,
+          { duration: 6000 }
+        );
+      }
 
       setDownloadProgress('');
       

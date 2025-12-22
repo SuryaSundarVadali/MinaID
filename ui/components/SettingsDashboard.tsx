@@ -12,11 +12,12 @@ import { useWallet } from '../context/WalletContext';
 import { AccountSecurityCard } from './settings/AccountSecurityCard';
 import { DataManagementCard } from './settings/DataManagementCard';
 import { AccountDeletionCard } from './settings/AccountDeletionCard';
+import { PinataSettings } from './settings/PinataSettings';
 
 export function SettingsDashboard() {
   const router = useRouter();
   const { session, logout } = useWallet();
-  const [activeSection, setActiveSection] = useState<'security' | 'data' | 'danger'>('security');
+  const [activeSection, setActiveSection] = useState<'security' | 'data' | 'storage' | 'danger'>('security');
   const [isReady, setIsReady] = useState(false);
   const [userIdentifier, setUserIdentifier] = useState<string | null>(null);
 
@@ -168,6 +169,17 @@ export function SettingsDashboard() {
             Data
           </button>
           <button
+            onClick={() => setActiveSection('storage')}
+            className={`flex-1 px-4 py-3 rounded-lg font-medium transition-all ${
+              activeSection === 'storage'
+                ? 'bg-indigo-600 text-white shadow-md'
+                : 'text-gray-600 hover:bg-gray-100'
+            }`}
+          >
+            <span className="mr-2">☁️</span>
+            IPFS
+          </button>
+          <button
             onClick={() => setActiveSection('danger')}
             className={`flex-1 px-4 py-3 rounded-lg font-medium transition-all ${
               activeSection === 'danger'
@@ -188,6 +200,10 @@ export function SettingsDashboard() {
 
           {activeSection === 'data' && (
             <DataManagementCard session={effectiveSession} />
+          )}
+
+          {activeSection === 'storage' && (
+            <PinataSettings walletAddress={userIdentifier || undefined} />
           )}
 
           {activeSection === 'danger' && (

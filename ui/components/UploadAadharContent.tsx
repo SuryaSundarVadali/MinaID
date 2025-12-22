@@ -8,7 +8,7 @@ import { IPFSUploader } from './IPFSUploader';
 import { IPFSDownloader } from './IPFSDownloader';
 import GradientBG from './GradientBG';
 
-type UploadMode = 'device' | 'ipfs-upload' | 'ipfs-download';
+type UploadMode = 'device' | 'ipfs-upload' | 'ipfs-download' | 'ipfs-import';
 
 export default function UploadAadharContent() {
   const router = useRouter();
@@ -22,6 +22,7 @@ export default function UploadAadharContent() {
     aadharData?: AadharData;
     userIdentifier?: string;
     ipfsCID?: string;
+    isLoading?: boolean;
   }>({
     file: null,
     uploading: false,
@@ -163,20 +164,20 @@ export default function UploadAadharContent() {
             {/* Upload Mode Selector */}
             {!state.success && (
               <div className="mb-6">
-                <div className="flex rounded-lg border border-gray-300 p-1 bg-gray-50">
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-2 p-2 bg-gray-50 rounded-lg border border-gray-300">
                   <button
                     onClick={() => setUploadMode('device')}
-                    className={`flex-1 px-4 py-2 rounded-md text-sm font-medium transition-colors ${
+                    className={`px-3 py-2 rounded-md text-sm font-medium transition-colors ${
                       uploadMode === 'device'
                         ? 'bg-white text-indigo-600 shadow-sm'
                         : 'text-gray-600 hover:text-gray-900'
                     }`}
                   >
-                    📱 Upload from Device
+                    📱 From Device
                   </button>
                   <button
                     onClick={() => setUploadMode('ipfs-upload')}
-                    className={`flex-1 px-4 py-2 rounded-md text-sm font-medium transition-colors ${
+                    className={`px-3 py-2 rounded-md text-sm font-medium transition-colors ${
                       uploadMode === 'ipfs-upload'
                         ? 'bg-white text-indigo-600 shadow-sm'
                         : 'text-gray-600 hover:text-gray-900'
@@ -186,13 +187,23 @@ export default function UploadAadharContent() {
                   </button>
                   <button
                     onClick={() => setUploadMode('ipfs-download')}
-                    className={`flex-1 px-4 py-2 rounded-md text-sm font-medium transition-colors ${
+                    className={`px-3 py-2 rounded-md text-sm font-medium transition-colors ${
                       uploadMode === 'ipfs-download'
                         ? 'bg-white text-indigo-600 shadow-sm'
                         : 'text-gray-600 hover:text-gray-900'
                     }`}
                   >
-                    🔗 Load from IPFS
+                    🔗 MinaID IPFS
+                  </button>
+                  <button
+                    onClick={() => setUploadMode('ipfs-import')}
+                    className={`px-3 py-2 rounded-md text-sm font-medium transition-colors ${
+                      uploadMode === 'ipfs-import'
+                        ? 'bg-white text-indigo-600 shadow-sm'
+                        : 'text-gray-600 hover:text-gray-900'
+                    }`}
+                  >
+                    💾 IPFS Desktop
                   </button>
                 </div>
               </div>
@@ -411,6 +422,113 @@ export default function UploadAadharContent() {
                         buttonText="🔓 Download & Decrypt"
                       />
                     )}
+
+                    <button
+                      onClick={() => router.push('/dashboard')}
+                      className="w-full bg-gray-200 text-gray-700 px-6 py-3 rounded-lg font-semibold hover:bg-gray-300 transition-all active:scale-[0.98]"
+                    >
+                      Cancel
+                    </button>
+                  </>
+                )}
+
+                {/* IPFS Import Mode (from IPFS Desktop) */}
+                {uploadMode === 'ipfs-import' && (
+                  <>
+                    <div className="bg-amber-50 border border-amber-200 rounded-lg p-4">
+                      <h3 className="font-semibold text-amber-900 mb-2 text-sm sm:text-base">
+                        💾 Import from IPFS Desktop
+                      </h3>
+                      <p className="text-xs sm:text-sm text-amber-800 mb-2">
+                        Import unencrypted Aadhar XML data that you've uploaded to IPFS using IPFS Desktop or other IPFS tools.
+                      </p>
+                      <p className="text-xs sm:text-sm text-amber-800 font-semibold">
+                        ⚠️ This option is for data uploaded via IPFS Desktop (not encrypted by MinaID)
+                      </p>
+                    </div>
+
+                    {/* Simple CID Input */}
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-2">
+                        IPFS CID
+                      </label>
+                      <input
+                        type="text"
+                        placeholder="QmVfWCQSgB1cREyZgweMc6sVsSm7Xcrki5yHQrdWG9u9Jt"
+                        className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-amber-500 focus:border-transparent"
+                        onChange={(e) => setState(prev => ({ ...prev, ipfsCID: e.target.value }))}
+                      />
+                    </div>
+
+                    <button
+                      onClick={async () => {
+                        if (!state.ipfsCID) {
+                          setState(prev => ({ ...prev, error: 'Please enter a CID' }));
+                          return;
+                        }
+
+                        setState(prev => ({ ...prev, isLoading: true, error: undefined }));
+
+                        try {
+                          const { getIPFSService } = await import('../lib/IPFSService');
+                          const ipfsService = getIPFSService();
+                          
+                          // Download raw data (unencrypted)
+                          const result = await ipfsService.downloadRaw(state.ipfsCID);
+                          
+                          // Assume it's XML text
+                          let xmlContent: string;
+                          if (result.data instanceof Blob) {
+                            xmlContent = await result.data.text();
+                          } else if (typeof result.data === 'string') {
+                            xmlContent = result.data;
+                          } else {
+                            throw new Error('Unexpected data format');
+                          }
+
+                          // Parse XML
+                          const { parseAadharXML } = await import('../lib/AadharParser');
+                          const xmlBlob = new Blob([xmlContent], { type: 'text/xml' });
+                          const xmlFile = new File([xmlBlob], 'aadhar.xml', { type: 'text/xml' });
+                          const parsedData = await parseAadharXML(xmlFile);
+
+                          // Store locally
+                          if (!state.userIdentifier) {
+                            throw new Error('No user identifier');
+                          }
+
+                          localStorage.setItem(
+                            `aadhar_${state.userIdentifier}`,
+                            JSON.stringify(parsedData.data)
+                          );
+                          
+                          localStorage.setItem(
+                            `aadhar_ipfs_${state.userIdentifier}`,
+                            JSON.stringify({ cid: state.ipfsCID, timestamp: Date.now(), source: 'ipfs-desktop' })
+                          );
+
+                          setState(prev => ({ 
+                            ...prev, 
+                            success: true,
+                            aadharData: parsedData.data,
+                            isLoading: false
+                          }));
+
+                          setTimeout(() => router.push('/dashboard'), 2000);
+                        } catch (error: any) {
+                          console.error('[IPFS Import] Failed:', error);
+                          setState(prev => ({ 
+                            ...prev, 
+                            error: `Failed to import: ${error.message}`,
+                            isLoading: false
+                          }));
+                        }
+                      }}
+                      disabled={state.isLoading || !state.ipfsCID}
+                      className="w-full bg-amber-600 hover:bg-amber-700 disabled:bg-gray-400 text-white px-6 py-3 rounded-lg font-semibold transition-all shadow-md hover:shadow-lg active:scale-[0.98] disabled:cursor-not-allowed"
+                    >
+                      {state.isLoading ? '⏳ Importing...' : '📥 Import from IPFS Desktop'}
+                    </button>
 
                     <button
                       onClick={() => router.push('/dashboard')}

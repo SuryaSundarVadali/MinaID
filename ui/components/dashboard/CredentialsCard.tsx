@@ -59,6 +59,10 @@ export function CredentialsCard({
   const [showOnChainModal, setShowOnChainModal] = useState(false);
   const [txHash, setTxHash] = useState('');
   const [txStatus, setTxStatus] = useState<TxStatus>('unknown');
+  
+  // IPFS upload state
+  const [isUploadingIPFS, setIsUploadingIPFS] = useState(false);
+  const [ipfsCID, setIpfsCID] = useState<string | null>(null);
 
   const getCredentialIcon = (type: string) => {
     const icons: Record<string, string> = {
@@ -347,6 +351,65 @@ export function CredentialsCard({
     URL.revokeObjectURL(url);
   };
 
+  const handleUploadToIPFS = async () => {
+    if (!generatedProof || !userDid) {
+      alert('No proof data or user identifier available');
+      return;
+    }
+
+    try {
+      setIsUploadingIPFS(true);
+
+      const { getIPFSService } = await import('../../lib/IPFSService');
+      const { generatePassphrase } = await import('../../lib/IPFSCrypto');
+      const { getPinataCredentials } = await import('../settings/PinataSettings');
+      
+      // Get user's Pinata credentials
+      const credentials = getPinataCredentials(userDid);
+      
+      if (!credentials) {
+        alert('⚠️ Pinata account not connected!\n\nPlease connect your Pinata account in Settings to upload proofs to IPFS.');
+        setIsUploadingIPFS(false);
+        return;
+      }
+      
+      const ipfsService = getIPFSService();
+      
+      // Generate passphrase from wallet address
+      const passphrase = generatePassphrase(userDid, 'minaid-proof');
+      
+      // Upload proof to IPFS with encryption using user's credentials
+      const result = await ipfsService.uploadEncrypted(
+        generatedProof,
+        passphrase,
+        {
+          name: `minaid-proof-${generatedProof.proofType}-${Date.now()}`,
+          metadata: {
+            type: 'minaid-proof',
+            proofType: generatedProof.proofType,
+            did: userDid
+          }
+        },
+        credentials // Pass user's Pinata credentials
+      );
+
+      // Store CID
+      localStorage.setItem(
+        `minaid_proof_cid_${generatedProof.metadata?.proofId || Date.now()}`,
+        JSON.stringify({ cid: result.cid, timestamp: Date.now() })
+      );
+
+      setIpfsCID(result.cid);
+      setIsUploadingIPFS(false);
+      
+      alert(`✅ Proof uploaded to IPFS!\n\nCID: ${result.cid}\n\nShare this CID with verifiers to access your proof.`);
+    } catch (error: any) {
+      console.error('[CredentialsCard] IPFS upload failed:', error);
+      setIsUploadingIPFS(false);
+      alert(`Failed to upload to IPFS: ${error.message}`);
+    }
+  };
+
   return (
     <div className="bg-white rounded-xl shadow-lg p-6">
       <div className="flex items-center justify-between mb-6">
@@ -495,23 +558,55 @@ export function CredentialsCard({
                     {generatedProof.metadata?.proofId || generatedProof.proofType}
                   </p>
                 </div>
-                <div className="flex gap-2">
+                
+                {ipfsCID && (
+                  <div className="bg-purple-50 border border-purple-200 rounded-lg p-3 mb-4 text-left">
+                    <p className="text-xs text-purple-700 font-semibold mb-1">☁️ Uploaded to IPFS</p>
+                    <p className="text-xs font-mono text-purple-900 break-all mb-1">
+                      {ipfsCID}
+                    </p>
+                    <p className="text-xs text-purple-600">
+                      Share this CID with verifiers
+                    </p>
+                  </div>
+                )}
+                
+                <div className="space-y-2 mb-4">
+                  <button
+                    onClick={handleUploadToIPFS}
+                    disabled={isUploadingIPFS || !!ipfsCID}
+                    className="w-full px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 disabled:bg-gray-400 disabled:cursor-not-allowed transition-colors text-sm font-medium flex items-center justify-center gap-2"
+                  >
+                    {isUploadingIPFS ? (
+                      <>
+                        <div className="animate-spin h-4 w-4 border-2 border-white border-t-transparent rounded-full"></div>
+                        Uploading...
+                      </>
+                    ) : ipfsCID ? (
+                      <>✓ Uploaded to IPFS</>
+                    ) : (
+                      <>☁️ Upload to IPFS</>
+                    )}
+                  </button>
+                  
                   <button
                     onClick={downloadProof}
-                    className="flex-1 px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors text-sm font-medium"
+                    className="w-full px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors text-sm font-medium"
                   >
                     📥 Download Proof
                   </button>
-                  <button
-                    onClick={() => {
-                      setShowProofOptions(false);
-                      setGeneratedProof(null);
-                    }}
-                    className="px-4 py-2 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 transition-colors text-sm font-medium"
-                  >
-                    Close
-                  </button>
                 </div>
+                
+                <button
+                  onClick={() => {
+                    setShowProofOptions(false);
+                    setGeneratedProof(null);
+                    setIpfsCID(null);
+                  }}
+                  className="w-full px-4 py-2 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 transition-colors text-sm font-medium"
+                >
+                  Close
+                </button>
               </div>
             ) : (
               <>

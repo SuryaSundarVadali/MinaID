@@ -69,6 +69,8 @@ interface GenerationState {
   error?: string;
   proofId?: string;
   statusMessage: string;
+  ipfsCID?: string;
+  isUploadingIPFS?: boolean;
   generatedProof?: {
     proof: any;
     publicOutput: any;
@@ -526,6 +528,53 @@ export default function DIDProofGenerator({ proofType = 'citizenship' }: DIDProo
     });
   };
 
+  const handleUploadToIPFS = async () => {
+    if (!state.generatedProof || !userIdentifier) {
+      console.error('[DIDProofGenerator] No proof data or user identifier');
+      return;
+    }
+
+    try {
+      setState(prev => ({ ...prev, isUploadingIPFS: true }));
+
+      const { getIPFSService } = await import('../../lib/IPFSService');
+      const { generatePassphrase } = await import('../../lib/IPFSCrypto');
+      
+      const ipfsService = getIPFSService();
+      
+      // Generate passphrase from wallet address
+      const passphrase = generatePassphrase(userIdentifier, 'minaid-proof');
+      
+      // Upload proof to IPFS with encryption
+      const result = await ipfsService.uploadEncrypted(
+        state.generatedProof,
+        passphrase,
+        {
+          name: `minaid-proof-${state.generatedProof.proofType}-${Date.now()}`,
+          metadata: {
+            type: 'minaid-proof',
+            proofType: state.generatedProof.proofType,
+            did: state.generatedProof.did
+          }
+        }
+      );
+
+      // Store CID
+      localStorage.setItem(
+        `minaid_proof_cid_${state.proofId}`,
+        JSON.stringify({ cid: result.cid, timestamp: Date.now() })
+      );
+
+      setState(prev => ({ ...prev, ipfsCID: result.cid, isUploadingIPFS: false }));
+      
+      alert(`✅ Proof uploaded to IPFS!\n\nCID: ${result.cid}\n\nShare this CID with verifiers to access your proof.`);
+    } catch (error: any) {
+      console.error('[DIDProofGenerator] IPFS upload failed:', error);
+      setState(prev => ({ ...prev, isUploadingIPFS: false }));
+      alert(`Failed to upload to IPFS: ${error.message}`);
+    }
+  };
+
   const handleDownloadProof = () => {
     if (!state.generatedProof) {
       console.error('[DIDProofGenerator] No proof data to download');
@@ -745,7 +794,41 @@ export default function DIDProofGenerator({ proofType = 'citizenship' }: DIDProo
                 </p>
               </div>
 
+              {state.ipfsCID && (
+                <div className="bg-purple-50 border border-purple-200 rounded-lg p-4">
+                  <h3 className="font-semibold text-purple-900 mb-2 flex items-center gap-2">
+                    ☁️ Uploaded to IPFS
+                  </h3>
+                  <p className="text-sm text-purple-800 mb-2 font-mono break-all">
+                    CID: {state.ipfsCID}
+                  </p>
+                  <p className="text-xs text-purple-700">
+                    Share this CID with verifiers to access your proof securely.
+                  </p>
+                </div>
+              )}
+
               <div className="space-y-3">
+                <button
+                  onClick={handleUploadToIPFS}
+                  disabled={state.isUploadingIPFS}
+                  className="w-full bg-purple-600 text-white py-3 px-6 rounded-lg hover:bg-purple-700 disabled:bg-gray-400 transition font-semibold text-lg flex items-center justify-center gap-2"
+                >
+                  {state.isUploadingIPFS ? (
+                    <>
+                      <div className="animate-spin h-5 w-5 border-2 border-white border-t-transparent rounded-full"></div>
+                      Uploading to IPFS...
+                    </>
+                  ) : (
+                    <>
+                      <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
+                      </svg>
+                      ☁️ Upload Proof to IPFS
+                    </>
+                  )}
+                </button>
+
                 <button
                   onClick={handleDownloadProof}
                   className="w-full bg-green-600 text-white py-3 px-6 rounded-lg hover:bg-green-700 transition font-semibold text-lg flex items-center justify-center gap-2"
