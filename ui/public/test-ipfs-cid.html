@@ -1,0 +1,311 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>IPFS CID Tester</title>
+    <style>
+        body {
+            font-family: system-ui, -apple-system, sans-serif;
+            max-width: 800px;
+            margin: 50px auto;
+            padding: 20px;
+            background: #f5f5f5;
+        }
+        .container {
+            background: white;
+            padding: 30px;
+            border-radius: 12px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+        }
+        h1 {
+            color: #333;
+            margin-bottom: 10px;
+        }
+        .subtitle {
+            color: #666;
+            margin-bottom: 30px;
+        }
+        input {
+            width: 100%;
+            padding: 12px;
+            font-size: 14px;
+            border: 2px solid #ddd;
+            border-radius: 8px;
+            margin-bottom: 15px;
+            font-family: monospace;
+        }
+        button {
+            background: #0070f3;
+            color: white;
+            border: none;
+            padding: 12px 24px;
+            border-radius: 8px;
+            cursor: pointer;
+            font-size: 16px;
+            font-weight: 600;
+        }
+        button:hover {
+            background: #0051cc;
+        }
+        button:disabled {
+            background: #ccc;
+            cursor: not-allowed;
+        }
+        .result {
+            margin-top: 20px;
+            padding: 20px;
+            border-radius: 8px;
+            font-size: 14px;
+        }
+        .success {
+            background: #d4edda;
+            border: 1px solid #c3e6cb;
+            color: #155724;
+        }
+        .error {
+            background: #f8d7da;
+            border: 1px solid #f5c6cb;
+            color: #721c24;
+        }
+        .info {
+            background: #d1ecf1;
+            border: 1px solid #bee5eb;
+            color: #0c5460;
+        }
+        .code {
+            background: #f4f4f4;
+            padding: 15px;
+            border-radius: 6px;
+            overflow-x: auto;
+            margin-top: 10px;
+            font-family: monospace;
+            font-size: 12px;
+            max-height: 400px;
+            overflow-y: auto;
+        }
+        .gateway-list {
+            display: grid;
+            gap: 10px;
+            margin-top: 15px;
+        }
+        .gateway-item {
+            padding: 10px;
+            background: #f8f9fa;
+            border-radius: 6px;
+            font-size: 13px;
+        }
+        .loading {
+            display: inline-block;
+            width: 20px;
+            height: 20px;
+            border: 3px solid #f3f3f3;
+            border-top: 3px solid #0070f3;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+            margin-left: 10px;
+        }
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🧪 IPFS CID Tester</h1>
+        <p class="subtitle">Test if your CID is accessible and contains valid encrypted data</p>
+
+        <input 
+            type="text" 
+            id="cidInput" 
+            placeholder="Enter IPFS CID (e.g., QmVfWCQSgB1cREyZgweMc6sVsSm7Xcrki5yHQrdWG9u9Jt)"
+            value="QmVfWCQSgB1cREyZgweMc6sVsSm7Xcrki5yHQrdWG9u9Jt"
+        >
+
+        <button onclick="testCID()" id="testBtn">Test CID</button>
+
+        <div id="result"></div>
+    </div>
+
+    <script>
+        const gateways = [
+            'https://gateway.pinata.cloud',
+            'https://ipfs.io',
+            'https://dweb.link',
+            'https://cloudflare-ipfs.com',
+            'https://w3s.link'
+        ];
+
+        async function testCID() {
+            const cid = document.getElementById('cidInput').value.trim();
+            const resultDiv = document.getElementById('result');
+            const btn = document.getElementById('testBtn');
+
+            if (!cid) {
+                resultDiv.innerHTML = '<div class="result error">Please enter a CID</div>';
+                return;
+            }
+
+            btn.disabled = true;
+            btn.textContent = 'Testing...';
+            resultDiv.innerHTML = '<div class="result info">Testing CID across multiple gateways...<span class="loading"></span></div>';
+
+            const results = [];
+
+            // Test each gateway
+            for (const gateway of gateways) {
+                const url = `${gateway}/ipfs/${cid}`;
+                const gatewayName = new URL(gateway).hostname;
+                
+                try {
+                    console.log(`Testing ${gatewayName}...`);
+                    
+                    const controller = new AbortController();
+                    const timeout = setTimeout(() => controller.abort(), 10000); // 10s timeout
+                    
+                    const response = await fetch(url, { 
+                        signal: controller.signal,
+                        mode: 'cors'
+                    });
+                    
+                    clearTimeout(timeout);
+
+                    const contentType = response.headers.get('content-type');
+                    const responseText = await response.text();
+
+                    let result = {
+                        gateway: gatewayName,
+                        status: response.status,
+                        contentType: contentType,
+                        success: response.ok,
+                        isJSON: false,
+                        isEncrypted: false,
+                        data: null,
+                        error: null,
+                        preview: responseText.substring(0, 200)
+                    };
+
+                    if (response.ok) {
+                        // Check if XML/HTML error
+                        if (responseText.trim().startsWith('<?xml') || responseText.trim().startsWith('<!DOCTYPE')) {
+                            result.error = 'Gateway returned XML/HTML error page';
+                        } else {
+                            // Try parse as JSON
+                            try {
+                                const json = JSON.parse(responseText);
+                                result.isJSON = true;
+                                result.data = json;
+
+                                // Check if encrypted format
+                                if (json.ciphertext && json.iv && json.salt) {
+                                    result.isEncrypted = true;
+                                }
+                            } catch (e) {
+                                result.error = 'Not valid JSON: ' + e.message;
+                            }
+                        }
+                    } else {
+                        result.error = `HTTP ${response.status}: ${response.statusText}`;
+                    }
+
+                    results.push(result);
+                } catch (err) {
+                    results.push({
+                        gateway: gatewayName,
+                        success: false,
+                        error: err.name === 'AbortError' ? 'Timeout (>10s)' : err.message
+                    });
+                }
+            }
+
+            // Display results
+            displayResults(cid, results);
+            btn.disabled = false;
+            btn.textContent = 'Test CID';
+        }
+
+        function displayResults(cid, results) {
+            const resultDiv = document.getElementById('result');
+            
+            const successfulResults = results.filter(r => r.success);
+            const encryptedResults = results.filter(r => r.isEncrypted);
+
+            let html = '';
+
+            // Summary
+            if (encryptedResults.length > 0) {
+                html += '<div class="result success">';
+                html += '<strong>✅ CID is Valid and Encrypted!</strong><br>';
+                html += `Found on ${encryptedResults.length} gateway(s) with proper encryption format.`;
+                html += '</div>';
+            } else if (successfulResults.length > 0) {
+                html += '<div class="result error">';
+                html += '<strong>⚠️ CID Found but NOT Encrypted</strong><br>';
+                html += 'The data exists but is not in MinaID\'s encrypted format.';
+                html += '</div>';
+            } else {
+                html += '<div class="result error">';
+                html += '<strong>❌ CID Not Found</strong><br>';
+                html += 'The CID could not be retrieved from any gateway. It may not exist or is not pinned.';
+                html += '</div>';
+            }
+
+            // Gateway results
+            html += '<div class="gateway-list">';
+            results.forEach(r => {
+                html += '<div class="gateway-item">';
+                html += `<strong>${r.gateway}</strong>: `;
+                
+                if (r.isEncrypted) {
+                    html += '✅ Valid encrypted data';
+                } else if (r.isJSON) {
+                    html += '⚠️ JSON but not encrypted';
+                } else if (r.success) {
+                    html += '❌ Not JSON';
+                } else {
+                    html += `❌ ${r.error}`;
+                }
+                html += '</div>';
+            });
+            html += '</div>';
+
+            // Show data preview
+            const firstSuccess = successfulResults[0];
+            if (firstSuccess) {
+                html += '<div class="code">';
+                html += '<strong>Data Preview:</strong><br><br>';
+                
+                if (firstSuccess.data) {
+                    html += JSON.stringify(firstSuccess.data, null, 2);
+                } else {
+                    html += firstSuccess.preview;
+                }
+                
+                html += '</div>';
+            }
+
+            // Recommendations
+            html += '<div class="result info">';
+            html += '<strong>💡 Recommendations:</strong><br>';
+            
+            if (encryptedResults.length > 0) {
+                html += '• This CID can be used with MinaID\'s IPFS downloader<br>';
+                html += `• Best gateway: ${encryptedResults[0].gateway}`;
+            } else if (successfulResults.length > 0) {
+                html += '• This CID contains data but it\'s not encrypted by MinaID<br>';
+                html += '• You need to upload through MinaID\'s "Save to IPFS" feature<br>';
+                html += '• The data must have ciphertext, iv, and salt fields';
+            } else {
+                html += '• The CID may be invalid or not pinned to IPFS<br>';
+                html += '• Try uploading new data through MinaID<br>';
+                html += '• Make sure to copy the complete CID after upload';
+            }
+            
+            html += '</div>';
+
+            resultDiv.innerHTML = html;
+        }
+    </script>
+</body>
+</html>
