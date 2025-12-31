@@ -13,6 +13,14 @@ import {
   citizenshipToField,
   compileCitizenshipProgram
 } from './CitizenshipProof.js';
+import { MRZUtils } from './lib/MRZUtils.js';
+import {
+  PassportVerificationProgram,
+  PassportProof,
+  PassportPublicInput,
+  preparePassportData,
+  validatePassportOffChain
+} from './lib/PassportVerificationProgram.js';
 
 export { 
   DIDRegistry,
@@ -26,5 +34,11 @@ export {
   CitizenshipProofPublicInput,
   createCitizenshipHash,
   citizenshipToField,
-  compileCitizenshipProgram
+  compileCitizenshipProgram,
+  MRZUtils,
+  PassportVerificationProgram,
+  PassportProof,
+  PassportPublicInput,
+  preparePassportData,
+  validatePassportOffChain
 };

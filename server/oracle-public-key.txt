@@ -1,0 +1,6 @@
+Oracle Public Key for MinaID Smart Contract
+
+Public Key (Base58):
+B62qova14dZ5BZCgD6xDxtxjW6ahbrUL1h9suL69NvDwmZBiXzZZxoT
+
+Generated: 2025-12-29T10:01:27.354Z

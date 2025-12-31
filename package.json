@@ -1,9 +1,31 @@
 {
+  "name": "minaid-passport-system",
+  "version": "1.0.0",
+  "description": "MinaID Passport Verification System with Oracle Integration",
+  "scripts": {
+    "setup": "./setup-passport-integration.sh",
+    "start": "./start-passport-system.sh",
+    "stop": "./stop-passport-system.sh",
+    "dev:oracle": "cd server && npm run oracle:dev",
+    "dev:ui": "cd ui && npm run dev",
+    "test:oracle": "cd server && ./test-endpoints.sh",
+    "deploy:contract": "cd contracts && npx ts-node scripts/deploy-with-oracle.ts",
+    "build:contracts": "cd contracts && npm run build",
+    "logs:oracle": "tail -f logs/oracle.log",
+    "logs:ui": "tail -f logs/ui.log"
+  },
   "dependencies": {
     "@peculiar/webcrypto": "^1.5.0",
     "asn1js": "^3.0.6",
+    "cors": "^2.8.5",
+    "express": "^5.2.1",
+    "o1js": "^2.12.0",
     "pkijs": "^3.3.3",
     "webcrypto-shim": "^0.1.7",
     "xmldsigjs": "^2.8.3"
+  },
+  "devDependencies": {
+    "@types/cors": "^2.8.19",
+    "@types/express": "^5.0.6"
   }
 }

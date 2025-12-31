@@ -23,5 +23,5 @@
     "baseUrl": "." // base directory for module resolution
   },
   "include": ["./src", "./scripts"],
-  "exclude": ["./build", "node_modules"]
+  "exclude": ["./build", "node_modules", "**/*.test.ts", "./scripts/deploy-with-oracle.ts"]
 }

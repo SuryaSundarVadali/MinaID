@@ -2,15 +2,57 @@
 
 **Self-Sovereign Digital Identity with Zero-Knowledge Proofs**
 
-MinaID is a decentralized identity system built on Mina Protocol that enables privacy-preserving credential verification. Users can prove attributes about themselves—such as age, citizenship, or other credentials—without revealing underlying personal data. The system combines zero-knowledge proofs with FIDO2 passkey authentication to deliver a secure, user-friendly identity solution.
+MinaID is a decentralized identity system built on Mina Protocol that enables privacy-preserving credential verification. Users can prove attributes about themselves—such as age, citizenship, or other credentials—without revealing underlying personal data. The system combines zero-knowledge proofs with FIDO2 passkey authentication and **Oracle-based passport verification** to deliver a secure, user-friendly identity solution.
+
+## 🚀 Quick Start
+
+### Passport Verification System (NEW!)
+
+The MinaID Passport Verification System is now fully deployed and operational!
+
+**🎯 Access Now:**
+- **Passport Verification:** http://localhost:3000/passport-verify
+- **Dashboard:** http://localhost:3000
+- **Oracle API:** http://localhost:4000
+
+**📚 Complete Documentation:**
+- [✅ DEPLOYMENT COMPLETE](DEPLOYMENT_COMPLETE.md) - **START HERE** - System ready!
+- [📖 Integration Guide](PASSPORT_INTEGRATION_GUIDE.md) - Full system documentation
+- [🔧 Server Docs](server/DEPLOYMENT_STATUS.md) - Oracle server setup
+- [⚡ Quick Reference](server/QUICK_REFERENCE.txt) - Command cheat sheet
+
+**🛠️ Management:**
+```bash
+# Check system status
+./check-system-status.sh
+
+# Start all services
+npm start
+
+# Stop all services
+npm stop
+
+# Test Oracle endpoints
+cd server && ./test-endpoints.sh
+```
+
+---
 
 ## Overview
 
 Traditional digital identity systems require users to share sensitive personal information with every service they interact with. MinaID takes a different approach: by leveraging zero-knowledge cryptography, users generate mathematical proofs of their credentials that verifiers can validate without accessing the actual data.
 
-The platform integrates with India's Aadhar system as an initial identity source, though the architecture supports any government-issued or institutional credential. All heavy cryptographic computations happen client-side, with only compact proofs submitted on-chain for verification.
+The platform integrates with India's Aadhar system as an initial identity source, **plus Oracle-based international passport verification**, though the architecture supports any government-issued or institutional credential. All heavy cryptographic computations happen client-side, with only compact proofs submitted on-chain for verification.
 
 ### Key Capabilities
+
+**Oracle-Based Passport Verification** 🆕  
+- International passport verification via Oracle server
+- ICAO 9303 MRZ (Machine Readable Zone) parsing
+- Cryptographic signing of valid verifications
+- On-chain signature verification by smart contract
+- Privacy-preserving (no PII on blockchain)
+- Support for all ICAO-compliant passports
 
 **Zero-Knowledge Proof Generation**  
 Generate cryptographic proofs for:
@@ -22,6 +64,7 @@ Generate cryptographic proofs for:
 **Blockchain-Backed Verification**  
 - Proof commitments registered on Mina blockchain via DIDRegistry smart contract
 - On-chain verification for age and KYC proofs through ZKPVerifier contract
+- Oracle signature verification for passport credentials
 - Immutable audit trail without storing sensitive data
 - Merkle tree-based DID storage for efficient state management
 

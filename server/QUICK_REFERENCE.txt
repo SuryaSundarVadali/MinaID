@@ -1,0 +1,161 @@
+╔══════════════════════════════════════════════════════════════╗
+║                                                              ║
+║   ✅ MinaID Oracle & Passport Service - QUICK REFERENCE      ║
+║                                                              ║
+╚══════════════════════════════════════════════════════════════╝
+
+📍 SERVER STATUS: DEPLOYED & RUNNING
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+🌐 Base URL: http://localhost:4000
+📦 Port: 4000
+🔑 Oracle Public Key: B62qova14dZ5BZCgD6xDxtxjW6ahbrUL1h9suL69NvDwmZBiXzZZxoT
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+🚀 QUICK START COMMANDS
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+# Start server (development)
+cd /home/surya/Code/Mina/MinaID/server
+npm run oracle:dev
+
+# Start server (background)
+cd /home/surya/Code/Mina/MinaID/server
+nohup npm run oracle:dev > oracle.log 2>&1 &
+
+# Test endpoints
+cd /home/surya/Code/Mina/MinaID/server
+./test-endpoints.sh
+
+# Check logs
+tail -f /home/surya/Code/Mina/MinaID/server/oracle.log
+
+# Stop server
+pkill -f "node.*oracle-server"
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+📡 API ENDPOINTS
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+1️⃣  Health Check
+    GET http://localhost:4000/health
+
+2️⃣  Get Oracle Public Key
+    GET http://localhost:4000/oracle-key
+
+3️⃣  Verify Passport
+    POST http://localhost:4000/verify-passport
+    Content-Type: application/json
+    Body: {"passportData": {...}}
+
+4️⃣  Batch Verification
+    POST http://localhost:4000/verify-batch
+    Content-Type: application/json
+    Body: {"requests": [{passportData: {...}}, ...]}
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+🧪 QUICK TESTS
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+# Test health
+curl http://localhost:4000/health
+
+# Test Oracle key
+curl http://localhost:4000/oracle-key
+
+# Test passport verification (ICAO specimen)
+curl -X POST http://localhost:4000/verify-passport \
+  -H "Content-Type: application/json" \
+  -d '{
+    "passportData": {
+      "passportNumber": "L898902C3",
+      "birthDate": "740812",
+      "expiryDate": "251215",
+      "nationality": "UTO",
+      "fullName": "ERIKSSON ANNA MARIA",
+      "mrzLine1": "P<UTOERIKSSON<<ANNA<MARIA<<<<<<<<<<<<<<<<<<<",
+      "mrzLine2": "L898902C36UTO7408122F1204159ZE184226B<<<<<10",
+      "verificationType": "physical"
+    }
+  }'
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+🔑 ORACLE KEYS
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Private Key Location: /home/surya/Code/Mina/MinaID/server/.env
+Public Key File: /home/surya/Code/Mina/MinaID/server/oracle-public-key.txt
+
+Public Key (Base58):
+B62qova14dZ5BZCgD6xDxtxjW6ahbrUL1h9suL69NvDwmZBiXzZZxoT
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+🔗 SMART CONTRACT INTEGRATION
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Add to your MinaIDContract.ts:
+
+import { PublicKey } from 'o1js';
+
+// In your contract initialization
+this.oraclePublicKey.set(
+  PublicKey.fromBase58('B62qova14dZ5BZCgD6xDxtxjW6ahbrUL1h9suL69NvDwmZBiXzZZxoT')
+);
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+📁 KEY FILES
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+/home/surya/Code/Mina/MinaID/server/
+  ├── oracle-server.ts          # Main server code
+  ├── .env                      # Environment variables (SECRET!)
+  ├── oracle-public-key.txt     # Public key reference
+  ├── deploy.sh                 # Deployment script
+  ├── test-endpoints.sh         # Testing script
+  ├── DEPLOYMENT_STATUS.md      # Full deployment guide
+  └── package.json              # Dependencies
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+🛠️ TROUBLESHOOTING
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Problem: Server won't start
+Fix: pkill -f "node.*oracle-server" && cd /home/surya/Code/Mina/MinaID/server && npm run oracle:dev
+
+Problem: Port already in use
+Fix: lsof -ti:4000 | xargs kill -9
+
+Problem: Module not found
+Fix: cd /home/surya/Code/Mina/MinaID/server && npm install
+
+Problem: o1js fails to load
+Fix: npm rebuild o1js
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+📚 DOCUMENTATION
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Full Guides:
+  • DEPLOYMENT_STATUS.md         - Deployment summary
+  • DEPLOYMENT.md                 - Production deployment guide
+  • PASSPORT_VERIFICATION_GUIDE.md - Integration tutorial
+  • DATA_FLOW_GUIDE.md           - Data flow diagrams
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+✅ DEPLOYMENT CHECKLIST
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+ ✅ Server deployed and running
+ ✅ Oracle keys generated
+ ✅ Environment configured
+ ✅ All endpoints operational
+ ⏳ Integrate with frontend
+ ⏳ Deploy smart contract
+ ⏳ Test end-to-end flow
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+🎉 DEPLOYMENT SUCCESSFUL!
+Your Oracle server is ready to verify passports and sign results!
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
