@@ -35,6 +35,14 @@ export interface OracleVerificationResult {
     expiryValid: boolean;
     blacklist: boolean;
     nfcSignature?: boolean;
+    hologram?: boolean; // NEW: hologram verification result
+  };
+  hologramValid?: boolean; // NEW: top-level hologram validity flag
+  hologramDetails?: {
+    chromaValid: boolean;
+    behaviorValid: boolean;
+    regionValid: boolean;
+    confidence: number;
   };
   error?: string;
 }
@@ -125,6 +133,40 @@ export class OracleService {
   }
 
   /**
+   * Verify a passport with hologram video (NEW)
+   * Uses multipart/form-data to upload video along with passport data
+   */
+  async verifyPassportWithHologram(
+    passportData: PassportData, 
+    videoFile: File
+  ): Promise<OracleVerificationResult> {
+    try {
+      // Create FormData for multipart upload
+      const formData = new FormData();
+      formData.append('video', videoFile);
+      formData.append('passportData', JSON.stringify(passportData));
+
+      const response = await fetch(`${this.oracleUrl}/verify-passport`, {
+        method: 'POST',
+        body: formData,
+        // Don't set Content-Type header - browser will set it with boundary
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.error || 'Oracle verification failed');
+      }
+
+      const result: OracleVerificationResult = await response.json();
+      
+      return result;
+    } catch (error) {
+      console.error('Oracle verification error:', error);
+      throw error;
+    }
+  }
+
+  /**
    * Verify multiple passports in batch
    */
   async verifyBatch(requests: { passportData: PassportData }[]): Promise<{
@@ -180,10 +222,12 @@ export class OracleService {
 
   /**
    * Prepare data for smart contract submission
+   * UPDATED: Now includes hologramValid field
    */
   async prepareContractData(verificationResult: OracleVerificationResult): Promise<{
     passportHash: Field;
     isValid: boolean;
+    hologramValid: boolean; // NEW
     timestamp: Field;
     signature: Signature;
   }> {
@@ -195,10 +239,12 @@ export class OracleService {
     const passportHash = Field(verificationResult.passportHash);
     const signature = this.parseSignature(verificationResult.signature);
     const timestamp = Field(Math.floor(verificationResult.timestamp / 1000));
+    const hologramValid = verificationResult.hologramValid ?? false; // NEW
 
     return {
       passportHash,
       isValid: verificationResult.isValid,
+      hologramValid, // NEW
       timestamp,
       signature,
     };

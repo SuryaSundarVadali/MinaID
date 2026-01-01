@@ -1,5 +1,5 @@
-const WebSocket = require('ws');
-const http = require('http');
+import WebSocket from 'ws';
+import http from 'http';
 
 /**
  * MinaID WebSocket Server

@@ -22,6 +22,13 @@ export default function PassportScanner({ onVerified, onError }: PassportScanner
   const [mrzLine2, setMrzLine2] = useState('');
   const [manualMode, setManualMode] = useState(true);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  
+  // Hologram verification state
+  const [hologramVideo, setHologramVideo] = useState<File | null>(null);
+  const [isRecording, setIsRecording] = useState(false);
+  const videoInputRef = useRef<HTMLInputElement>(null);
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const recordedChunksRef = useRef<Blob[]>([]);
 
   // Parse MRZ data
   const parseMRZ = (line1: string, line2: string): PassportData | null => {
@@ -65,6 +72,11 @@ export default function PassportScanner({ onVerified, onError }: PassportScanner
       return;
     }
 
+    if (!hologramVideo) {
+      onError?.('Please record a video of the passport hologram');
+      return;
+    }
+
     // Remove any whitespace and convert to uppercase
     const line1 = mrzLine1.trim().toUpperCase();
     const line2 = mrzLine2.trim().toUpperCase();
@@ -76,8 +88,8 @@ export default function PassportScanner({ onVerified, onError }: PassportScanner
       return;
     }
 
-    // Verify with Oracle
-    await verifyWithOracle(passportData);
+    // Verify with Oracle (including hologram video)
+    await verifyWithOracle(passportData, hologramVideo);
   };
 
   // Handle image upload for OCR
@@ -107,7 +119,7 @@ export default function PassportScanner({ onVerified, onError }: PassportScanner
   };
 
   // Verify passport with Oracle
-  const verifyWithOracle = async (passportData: PassportData) => {
+  const verifyWithOracle = async (passportData: PassportData, videoFile: File) => {
     setIsVerifying(true);
 
     try {
@@ -119,9 +131,10 @@ export default function PassportScanner({ onVerified, onError }: PassportScanner
 
       console.log('🔍 Verifying passport with Oracle...');
       console.log('Passport data:', passportData);
+      console.log('Hologram video:', videoFile.name, videoFile.size, 'bytes');
 
-      // Send to Oracle for verification
-      const result = await oracleService.verifyPassport(passportData);
+      // Send to Oracle for verification (with hologram video)
+      const result = await oracleService.verifyPassportWithHologram(passportData, videoFile);
 
       console.log('✅ Oracle verification result:', result);
 
@@ -152,6 +165,81 @@ export default function PassportScanner({ onVerified, onError }: PassportScanner
   const loadTestPassport = () => {
     setMrzLine1('P<UTOERIKSSON<<ANNA<MARIA<<<<<<<<<<<<<<<<<<<');
     setMrzLine2('L898902C36UTO7408122F1204159ZE184226B<<<<<10');
+  };
+
+  // Handle video file upload
+  const handleVideoUpload = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (file) {
+      // Validate video file
+      if (!file.type.startsWith('video/')) {
+        onError?.('Please upload a valid video file');
+        return;
+      }
+      
+      // Check file size (max 50MB)
+      if (file.size > 50 * 1024 * 1024) {
+        onError?.('Video file is too large. Please upload a video smaller than 50MB');
+        return;
+      }
+      
+      setHologramVideo(file);
+      console.log('✅ Hologram video uploaded:', file.name, file.size, 'bytes');
+    }
+  };
+
+  // Start recording video from webcam
+  const startRecording = async () => {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ 
+        video: { facingMode: 'environment' }, // Prefer back camera on mobile
+        audio: false 
+      });
+      
+      recordedChunksRef.current = [];
+      const mediaRecorder = new MediaRecorder(stream, {
+        mimeType: 'video/webm;codecs=vp9',
+      });
+      
+      mediaRecorder.ondataavailable = (event) => {
+        if (event.data.size > 0) {
+          recordedChunksRef.current.push(event.data);
+        }
+      };
+      
+      mediaRecorder.onstop = () => {
+        const blob = new Blob(recordedChunksRef.current, { type: 'video/webm' });
+        const file = new File([blob], `hologram-${Date.now()}.webm`, { type: 'video/webm' });
+        setHologramVideo(file);
+        console.log('✅ Recording complete:', file.size, 'bytes');
+        
+        // Stop all tracks
+        stream.getTracks().forEach(track => track.stop());
+      };
+      
+      mediaRecorderRef.current = mediaRecorder;
+      mediaRecorder.start();
+      setIsRecording(true);
+      
+      // Auto-stop after 10 seconds
+      setTimeout(() => {
+        if (mediaRecorderRef.current?.state === 'recording') {
+          stopRecording();
+        }
+      }, 10000);
+      
+    } catch (error) {
+      console.error('Camera access error:', error);
+      onError?.('Failed to access camera. Please allow camera permissions or upload a video file.');
+    }
+  };
+
+  // Stop recording video
+  const stopRecording = () => {
+    if (mediaRecorderRef.current && mediaRecorderRef.current.state === 'recording') {
+      mediaRecorderRef.current.stop();
+      setIsRecording(false);
+    }
   };
 
   return (
@@ -230,9 +318,81 @@ export default function PassportScanner({ onVerified, onError }: PassportScanner
             </button>
           </div>
 
+          {/* Hologram Video Section */}
+          <div className="border-t border-gray-200 pt-4">
+            <label className="block text-sm font-medium text-gray-700 mb-3">
+              🎥 Hologram Verification Video (Required)
+            </label>
+            
+            {hologramVideo ? (
+              <div className="bg-green-50 border border-green-200 rounded-lg p-4">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-3">
+                    <span className="text-2xl">✅</span>
+                    <div>
+                      <p className="font-medium text-green-900">{hologramVideo.name}</p>
+                      <p className="text-sm text-green-700">
+                        {(hologramVideo.size / 1024 / 1024).toFixed(2)} MB
+                      </p>
+                    </div>
+                  </div>
+                  <button
+                    onClick={() => setHologramVideo(null)}
+                    className="px-3 py-1 text-sm text-red-600 hover:bg-red-50 rounded transition-colors"
+                  >
+                    Remove
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <div className="space-y-3">
+                <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-3">
+                  <p className="text-sm text-yellow-800">
+                    📹 <strong>Record a 5-10 second video</strong> showing the passport hologram from different angles.
+                    Tilt the passport slowly to capture the hologram's dynamic optical effects.
+                  </p>
+                </div>
+                
+                <div className="flex gap-2">
+                  {isRecording ? (
+                    <button
+                      onClick={stopRecording}
+                      className="flex-1 px-4 py-3 bg-red-600 text-white rounded-lg font-medium hover:bg-red-700 transition-colors animate-pulse"
+                    >
+                      ⏹ Stop Recording
+                    </button>
+                  ) : (
+                    <>
+                      <button
+                        onClick={startRecording}
+                        className="flex-1 px-4 py-3 bg-purple-600 text-white rounded-lg font-medium hover:bg-purple-700 transition-colors"
+                      >
+                        📹 Record Video
+                      </button>
+                      <button
+                        onClick={() => videoInputRef.current?.click()}
+                        className="flex-1 px-4 py-3 bg-blue-600 text-white rounded-lg font-medium hover:bg-blue-700 transition-colors"
+                      >
+                        📁 Upload Video
+                      </button>
+                    </>
+                  )}
+                </div>
+                
+                <input
+                  ref={videoInputRef}
+                  type="file"
+                  accept="video/*"
+                  onChange={handleVideoUpload}
+                  className="hidden"
+                />
+              </div>
+            )}
+          </div>
+
           <button
             onClick={handleManualVerify}
-            disabled={isVerifying || mrzLine1.length !== 44 || mrzLine2.length !== 44}
+            disabled={isVerifying || mrzLine1.length !== 44 || mrzLine2.length !== 44 || !hologramVideo}
             className="w-full px-6 py-3 bg-blue-600 text-white rounded-lg font-medium hover:bg-blue-700 disabled:bg-gray-300 disabled:cursor-not-allowed transition-colors"
           >
             {isVerifying ? (
@@ -288,7 +448,9 @@ export default function PassportScanner({ onVerified, onError }: PassportScanner
         <h3 className="font-medium text-blue-900 mb-2">ℹ️ How it works:</h3>
         <ol className="text-sm text-blue-800 space-y-1 list-decimal list-inside">
           <li>Enter or scan your passport's MRZ (Machine Readable Zone)</li>
+          <li>Record a video of the passport hologram (5-10 seconds, tilting slowly)</li>
           <li>The Oracle server validates the MRZ checksums</li>
+          <li>Computer vision algorithms verify the hologram authenticity</li>
           <li>Oracle signs the verification result cryptographically</li>
           <li>Submit the signed result to the blockchain</li>
           <li>Receive your verifiable digital identity (DID)</li>

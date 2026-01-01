@@ -119,35 +119,49 @@ export class MinaIDContract extends SmartContract {
   
   /**
    * Verify identity using Oracle signature.
+   * UPDATED: Now includes hologram verification.
    * 
    * This is for PHYSICAL passports verified by the Oracle.
-   * The Oracle performs off-chain checks (MRZ, document security, etc.)
-   * and signs the result. We verify the signature on-chain.
+   * The Oracle performs off-chain checks:
+   * - MRZ checksums
+   * - Document security features
+   * - Expiry date validation
+   * - Blacklist check
+   * - Hologram authenticity (computer vision)
+   * 
+   * The Oracle signs the result with all verification results.
+   * We verify the signature on-chain and enforce hologram validity.
    * 
    * @param passportHash - Hash of passport data (for privacy)
-   * @param isValid - Whether Oracle deemed passport valid
+   * @param isValid - Whether Oracle deemed MRZ/document valid
+   * @param hologramValid - Whether Oracle deemed hologram authentic (NEW)
    * @param timestamp - When verification occurred
-   * @param oracleSignature - Oracle's signature on [passportHash, isValid, timestamp]
+   * @param oracleSignature - Oracle's signature on [passportHash, isValid, hologramValid, timestamp]
    */
   @method async verifyIdentityWithOracle(
     passportHash: Field,
     isValid: Bool,
+    hologramValid: Bool, // NEW: Hologram verification result
     timestamp: Field,
     oracleSignature: Signature
   ) {
     // Get oracle's public key from state
     const oraclePublicKey = this.oraclePublicKey.getAndRequireEquals();
     
-    // Construct the message that was signed
+    // Construct the message that was signed (UPDATED to include hologram)
     const validityFlag = isValid.toField();
-    const message = [passportHash, validityFlag, timestamp];
+    const hologramFlag = hologramValid.toField(); // NEW
+    const message = [passportHash, validityFlag, hologramFlag, timestamp];
     
     // Verify Oracle's signature
     const signatureValid = oracleSignature.verify(oraclePublicKey, message);
     signatureValid.assertTrue('Invalid Oracle signature');
     
-    // Require that Oracle says it's valid
+    // Require that Oracle says MRZ/document is valid
     isValid.assertTrue('Oracle verification failed - passport invalid');
+    
+    // Require that hologram is valid (CRITICAL SECURITY CHECK)
+    hologramValid.assertTrue('Hologram verification failed - possible forgery');
     
     // Check timestamp is recent (within 1 hour)
     const currentTime = this.network.timestamp.getAndRequireEquals();

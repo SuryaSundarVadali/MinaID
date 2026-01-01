@@ -11,20 +11,35 @@
 import 'dotenv/config';
 import express from 'express';
 import cors from 'cors';
+import multer from 'multer';
+import axios from 'axios';
+import FormData from 'form-data';
+import fs from 'fs';
+import path from 'path';
 
 const app = express();
 app.use(cors());
 app.use(express.json());
 
+// Configure multer for file uploads
+const upload = multer({ 
+  dest: 'uploads/',
+  limits: { fileSize: 50 * 1024 * 1024 } // 50MB limit
+});
+
 // ============================================
 // Oracle Configuration
 // ============================================
+
+// Hologram Service Configuration
+const HOLOGRAM_SERVICE_URL = process.env.HOLOGRAM_SERVICE_URL || 'http://localhost:8000';
 
 let Field: any;
 let PrivateKey: any;
 let PublicKey: any;
 let Signature: any;
 let Poseidon: any;
+let Bool: any;
 let ORACLE_PRIVATE_KEY: any;
 let ORACLE_PUBLIC_KEY: any;
 
@@ -36,6 +51,7 @@ const initO1js = async () => {
   PublicKey = o1js.PublicKey;
   Signature = o1js.Signature;
   Poseidon = o1js.Poseidon;
+  Bool = o1js.Bool;
 
   /**
    * Oracle's private key (KEEP THIS SECRET!)
@@ -78,6 +94,7 @@ interface VerificationRequest {
 
 interface VerificationResult {
   isValid: boolean;
+  hologramValid: boolean; // NEW: Hologram verification result
   passportHash: string; // Field as base58 string
   signature: string; // Signature as JSON string
   oraclePublicKey: string;
@@ -89,6 +106,13 @@ interface VerificationResult {
     expiryValid: boolean;
     blacklist: boolean;
     nfcSignature?: boolean;
+    hologramVerification?: boolean; // NEW: Hologram check result
+  };
+  hologramDetails?: { // NEW: Hologram verification details
+    confidence: number;
+    details: string;
+    frames: number;
+    detections: number;
   };
   error?: string;
 }
@@ -96,6 +120,74 @@ interface VerificationResult {
 // ============================================
 // Verification Functions
 // ============================================
+
+/**
+ * Verifies hologram authenticity by calling the Python microservice.
+ * 
+ * @param videoPath - Path to the video file containing passport hologram
+ * @returns Promise resolving to hologram verification result
+ */
+async function verifyHologram(videoPath: string): Promise<{
+  valid: boolean;
+  confidence: number;
+  details: string;
+  frames: number;
+  detections: number;
+}> {
+  try {
+    console.log('🎥 Verifying hologram with Python service...');
+    
+    // Check if video file exists
+    if (!fs.existsSync(videoPath)) {
+      throw new Error(`Video file not found: ${videoPath}`);
+    }
+    
+    // Create form data with video file
+    const form = new FormData();
+    form.append('video', fs.createReadStream(videoPath));
+    
+    // Call hologram verification service
+    const response = await axios.post(
+      `${HOLOGRAM_SERVICE_URL}/verify_hologram`,
+      form,
+      {
+        headers: {
+          ...form.getHeaders(),
+        },
+        timeout: 120000, // 2 minute timeout for video processing
+      }
+    );
+    
+    const result = response.data;
+    
+    console.log('✅ Hologram verification complete');
+    console.log(`   Valid: ${result.valid}`);
+    console.log(`   Confidence: ${result.confidence}`);
+    console.log(`   Details: ${result.details}`);
+    
+    return {
+      valid: result.valid,
+      confidence: result.confidence,
+      details: result.details,
+      frames: result.total_frames,
+      detections: result.detections_count,
+    };
+    
+  } catch (error) {
+    console.error('❌ Hologram verification error:', error);
+    
+    if (axios.isAxiosError(error)) {
+      if (error.code === 'ECONNREFUSED') {
+        throw new Error('Hologram service not reachable. Is it running on port 8000?');
+      }
+      if (error.response) {
+        throw new Error(`Hologram service error: ${error.response.data?.detail || error.response.statusText}`);
+      }
+    }
+    
+    throw error;
+  }
+}
 
 /**
  * Validates MRZ checksums for a passport.
@@ -238,17 +330,20 @@ function createPassportHash(passportData: PassportData): typeof Field {
 
 /**
  * Signs the verification result using Oracle's private key.
+ * UPDATED: Now includes hologramValid in the signature
  */
 function signVerificationResult(
   passportHash: typeof Field,
-  isValid: boolean
+  isValid: boolean,
+  hologramValid: boolean
 ): typeof Signature {
   // Create message to sign
-  // Message format: [passportHash, isValid (1 or 0), timestamp]
+  // Message format: [passportHash, isValid, hologramValid, timestamp]
   const timestamp = Field(Math.floor(Date.now() / 1000));
-  const validityFlag = Field(isValid ? 1 : 0);
+  const validityFlag = Bool(isValid).toField();
+  const hologramFlag = Bool(hologramValid).toField();
   
-  const message = [passportHash, validityFlag, timestamp];
+  const message = [passportHash, validityFlag, hologramFlag, timestamp];
   
   // Sign the message
   const signature = Signature.create(ORACLE_PRIVATE_KEY, message);
@@ -283,57 +378,116 @@ app.get('/oracle-key', (req, res) => {
 });
 
 /**
- * Main verification endpoint
+ * Main verification endpoint (UPDATED with hologram support)
  * POST /verify-passport
+ * 
+ * Accepts multipart/form-data with:
+ * - passportData: JSON string with passport information
+ * - image: (optional) Image file for physical passport
+ * - video: (optional) Video file for hologram verification
  */
-app.post('/verify-passport', async (req, res) => {
+app.post('/verify-passport', upload.fields([
+  { name: 'image', maxCount: 1 },
+  { name: 'video', maxCount: 1 }
+]), async (req, res) => {
+  let videoPath: string | undefined;
+  let imagePath: string | undefined;
+  
   try {
-    const { passportData, imageUrl, nfcData } = req.body as VerificationRequest;
+    // Parse passport data from form
+    const passportData: PassportData = JSON.parse(req.body.passportData);
+    const files = req.files as { [fieldname: string]: Express.Multer.File[] };
+    
+    // Get file paths
+    if (files.image && files.image[0]) {
+      imagePath = files.image[0].path;
+    }
+    if (files.video && files.video[0]) {
+      videoPath = files.video[0].path;
+    }
     
     console.log('📋 Received verification request');
     console.log('Type:', passportData.verificationType);
     console.log('Passport:', passportData.passportNumber);
+    console.log('Has video:', !!videoPath);
+    console.log('Has image:', !!imagePath);
     
-    // Run all verification checks
+    // Initialize hologram verification result
+    let hologramResult = {
+      valid: true, // Default to true if no video provided
+      confidence: 0,
+      details: 'No video provided',
+      frames: 0,
+      detections: 0
+    };
+    
+    // Run hologram verification if video is provided
+    if (videoPath) {
+      try {
+        hologramResult = await verifyHologram(videoPath);
+      } catch (hologramError) {
+        console.error('Hologram verification failed:', hologramError);
+        hologramResult.valid = false;
+        hologramResult.details = hologramError instanceof Error 
+          ? hologramError.message 
+          : 'Hologram verification failed';
+      }
+    }
+    
+    // Run all other verification checks
     const checks = {
       mrzChecksum: validateMRZChecksums(passportData),
-      documentSecurity: await verifyDocumentSecurity(imageUrl),
+      documentSecurity: await verifyDocumentSecurity(imagePath),
       expiryValid: !isPassportExpired(passportData.expiryDate),
       blacklist: await checkBlacklist(passportData.passportNumber),
       nfcSignature: passportData.verificationType === 'epassport' 
-        ? validateNFCSignature(nfcData) 
+        ? validateNFCSignature(req.body.nfcData) 
         : undefined,
+      hologramVerification: hologramResult.valid, // NEW: Include hologram check
     };
     
-    // Determine overall validity
+    // Determine overall validity (including hologram)
     const isValid = checks.mrzChecksum 
       && checks.documentSecurity 
       && checks.expiryValid 
       && checks.blacklist
       && (passportData.verificationType === 'physical' || checks.nfcSignature === true);
     
+    const hologramValid = hologramResult.valid;
+    
     console.log('✅ Verification checks:', checks);
-    console.log('Result:', isValid ? 'VALID' : 'INVALID');
+    console.log('MRZ Valid:', isValid);
+    console.log('Hologram Valid:', hologramValid);
     
     // Create passport hash
     const passportHash = createPassportHash(passportData);
     
-    // Sign the result
-    const signature = signVerificationResult(passportHash, isValid);
+    // Sign the result (NOW INCLUDES HOLOGRAM)
+    const signature = signVerificationResult(passportHash, isValid, hologramValid);
     
     // Prepare response
     const result: VerificationResult = {
       isValid,
+      hologramValid, // NEW: Include hologram validity
       passportHash: passportHash.toString(),
       signature: JSON.stringify(signature.toJSON()),
       oraclePublicKey: ORACLE_PUBLIC_KEY.toBase58(),
       timestamp: Date.now(),
       verificationType: passportData.verificationType,
       checks,
+      hologramDetails: { // NEW: Include hologram details
+        confidence: hologramResult.confidence,
+        details: hologramResult.details,
+        frames: hologramResult.frames,
+        detections: hologramResult.detections,
+      },
     };
     
-    if (!isValid) {
-      result.error = 'Verification failed. Check individual checks for details.';
+    if (!isValid || !hologramValid) {
+      const reasons = [];
+      if (!isValid) reasons.push('MRZ/document verification failed');
+      if (!hologramValid) reasons.push('Hologram verification failed');
+      result.error = `Verification failed: ${reasons.join(', ')}. Check individual checks for details.`;
     }
     
     res.json(result);
@@ -342,8 +496,17 @@ app.post('/verify-passport', async (req, res) => {
     console.error('Verification error:', error);
     res.status(500).json({
       isValid: false,
+      hologramValid: false,
       error: error instanceof Error ? error.message : 'Unknown error',
     });
+  } finally {
+    // Clean up uploaded files
+    if (videoPath && fs.existsSync(videoPath)) {
+      fs.unlinkSync(videoPath);
+    }
+    if (imagePath && fs.existsSync(imagePath)) {
+      fs.unlinkSync(imagePath);
+    }
   }
 });
 
@@ -382,7 +545,8 @@ app.post('/verify-batch', async (req, res) => {
             && (request.passportData.verificationType === 'physical' || checks.nfcSignature === true);
           
           const passportHash = createPassportHash(request.passportData);
-          const signature = signVerificationResult(passportHash, isValid);
+          const hologramValid = true; // Batch endpoint doesn't support hologram verification yet
+          const signature = signVerificationResult(passportHash, isValid, hologramValid);
           
           return {
             isValid,
@@ -443,8 +607,12 @@ async function startServer() {
     console.log('🌐 Endpoints:');
     console.log(`   GET  http://localhost:${PORT}/health`);
     console.log(`   GET  http://localhost:${PORT}/oracle-key`);
-    console.log(`   POST http://localhost:${PORT}/verify-passport`);
+    console.log(`   POST http://localhost:${PORT}/verify-passport (with video support)`);
     console.log(`   POST http://localhost:${PORT}/verify-batch`);
+    console.log('');
+    console.log('🐍 Hologram Service:');
+    console.log(`   ${HOLOGRAM_SERVICE_URL}`);
+    console.log('   Make sure hologram service is running!');
     console.log('');
     console.log('='.repeat(60));
     console.log('');

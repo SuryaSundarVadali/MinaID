@@ -398,13 +398,13 @@ export function EnhancedDashboard() {
         <div className={styles.grid} style={{ marginBottom: '2rem' }}>
           <button
             className={styles.card}
-            onClick={() => router.push('/upload-aadhar')}
+            onClick={() => router.push('/upload-document')}
           >
             <h2>
-              <span>📄 Upload Credential</span>
+              <span>📋 Upload Document</span>
               <span>→</span>
             </h2>
-            <p>Add your Aadhar credential for proof generation</p>
+            <p>Choose and upload your identity document (Aadhar or Passport)</p>
           </button>
 
           <button

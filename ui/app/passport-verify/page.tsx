@@ -110,11 +110,12 @@ export default function PassportVerificationPage() {
       const { MinaIDContract } = await import('@/../../contracts/src/MinaIDContract');
       const contract = new MinaIDContract(PublicKey.fromBase58(CONTRACT_ADDRESS));
 
-      // Create transaction
+      // Create transaction (UPDATED to include hologramValid)
       const tx = await Mina.transaction(async () => {
         await contract.verifyIdentityWithOracle(
           state.contractData.passportHash,
           Bool(state.contractData.isValid),
+          Bool(state.contractData.hologramValid), // NEW: hologram verification result
           state.contractData.timestamp,
           state.contractData.signature
         );
