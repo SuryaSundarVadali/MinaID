@@ -69,7 +69,7 @@ export class OracleService {
       }
       
       const data = await response.json();
-      return data.status === 'healthy';
+      return data.status === 'healthy' || data.status === 'ok';
     } catch (error) {
       console.error('Oracle health check failed:', error);
       return false;

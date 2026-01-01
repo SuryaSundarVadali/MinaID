@@ -9,6 +9,7 @@
 import React, { useState, useRef } from 'react';
 import { oracleService, PassportData } from '@/lib/OracleService';
 import LoadingSpinner from './LoadingSpinner';
+import { createWorker } from 'tesseract.js';
 
 interface PassportScannerProps {
   onVerified: (verificationResult: any) => void;
@@ -100,22 +101,118 @@ export default function PassportScanner({ onVerified, onError }: PassportScanner
     setIsScanning(true);
 
     try {
-      // In a real implementation, use an OCR library like Tesseract.js
-      // For now, we'll show a placeholder
-      onError?.('OCR scanning is coming soon! Please use manual entry for now.');
+      console.log('🔍 Starting OCR scan of passport image...');
       
-      // TODO: Implement OCR scanning
-      // const mrzText = await performOCR(file);
-      // const [line1, line2] = mrzText.split('\n');
-      // const passportData = parseMRZ(line1, line2);
-      // await verifyWithOracle(passportData);
+      // Validate image file
+      if (!file.type.startsWith('image/')) {
+        throw new Error('Please upload a valid image file (JPG, PNG, etc.)');
+      }
+
+      // Check file size (max 10MB)
+      if (file.size > 10 * 1024 * 1024) {
+        throw new Error('Image file is too large. Please upload an image smaller than 10MB');
+      }
+
+      // Convert file to image URL for Tesseract
+      const imageUrl = URL.createObjectURL(file);
+
+      // Initialize Tesseract worker
+      console.log('📄 Initializing OCR engine...');
+      const worker = await createWorker('eng', 1, {
+        logger: (m) => {
+          if (m.status === 'recognizing text') {
+            console.log(`OCR Progress: ${Math.round(m.progress * 100)}%`);
+          }
+        },
+      });
+
+      // Perform OCR with optimized settings for MRZ
+      console.log('🔎 Extracting MRZ text from image...');
+      const { data: { text } } = await worker.recognize(imageUrl, {
+        rectangle: undefined, // Scan entire image
+      });
+
+      await worker.terminate();
+      URL.revokeObjectURL(imageUrl);
+
+      console.log('📝 Raw OCR text:', text);
+
+      // Extract MRZ lines from OCR result
+      const mrzLines = extractMRZFromText(text);
+      
+      if (!mrzLines || mrzLines.length < 2) {
+        throw new Error('Could not find valid MRZ lines in the image. Please ensure the passport MRZ area is clearly visible and try again, or use manual entry.');
+      }
+
+      const [line1, line2] = mrzLines;
+      console.log('✅ Extracted MRZ lines:', { line1, line2 });
+
+      // Update UI with extracted MRZ
+      setMrzLine1(line1);
+      setMrzLine2(line2);
+      setManualMode(true); // Show manual mode to let user verify/edit
+
+      // Parse MRZ
+      const passportData = parseMRZ(line1, line2);
+      if (!passportData) {
+        throw new Error('Could not parse MRZ data. Please verify the extracted text and edit if needed.');
+      }
+
+      console.log('✅ OCR scan complete! Please verify the extracted data.');
       
     } catch (error) {
       console.error('OCR error:', error);
-      onError?.('Failed to scan passport. Please try manual entry.');
+      onError?.(error instanceof Error ? error.message : 'Failed to scan passport. Please try manual entry.');
     } finally {
       setIsScanning(false);
     }
+  };
+
+  // Extract MRZ lines from OCR text
+  const extractMRZFromText = (text: string): string[] | null => {
+    // MRZ lines start with 'P<' for passports and are 44 characters long
+    const lines = text.split('\n').map(line => line.trim().toUpperCase());
+    
+    // Find lines that look like MRZ (contain mostly alphanumeric and '<' characters)
+    const mrzCandidates = lines.filter(line => {
+      // Remove spaces and special characters except '<'
+      const cleaned = line.replace(/[^A-Z0-9<]/g, '');
+      // MRZ lines are typically 44 characters
+      return cleaned.length >= 40 && cleaned.length <= 48;
+    });
+
+    if (mrzCandidates.length < 2) {
+      return null;
+    }
+
+    // Take the first two MRZ candidates
+    let line1 = mrzCandidates[0].replace(/[^A-Z0-9<]/g, '');
+    let line2 = mrzCandidates[1].replace(/[^A-Z0-9<]/g, '');
+
+    // Pad or trim to exactly 44 characters
+    line1 = line1.padEnd(44, '<').substring(0, 44);
+    line2 = line2.padEnd(44, '<').substring(0, 44);
+
+    // Validate that line1 starts with P< (passport type)
+    if (!line1.startsWith('P<')) {
+      // Try to find a line that starts with P<
+      const passportLine = mrzCandidates.find(line => 
+        line.replace(/[^A-Z0-9<]/g, '').startsWith('P<')
+      );
+      
+      if (passportLine) {
+        line1 = passportLine.replace(/[^A-Z0-9<]/g, '').padEnd(44, '<').substring(0, 44);
+        // Find the next line after passport line
+        const idx = mrzCandidates.indexOf(passportLine);
+        if (idx + 1 < mrzCandidates.length) {
+          line2 = mrzCandidates[idx + 1].replace(/[^A-Z0-9<]/g, '').padEnd(44, '<').substring(0, 44);
+        }
+      } else {
+        return null;
+      }
+    }
+
+    return [line1, line2];
   };
 
   // Verify passport with Oracle
