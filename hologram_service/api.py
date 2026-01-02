@@ -4,7 +4,7 @@ Integrates the Python hologram_verifier with the MinaID Oracle system
 """
 
 from fastapi import FastAPI, File, UploadFile, HTTPException
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 import sys
@@ -13,6 +13,11 @@ import tempfile
 import logging
 from typing import Dict, Any
 import uvicorn
+import cv2
+import numpy as np
+import base64
+import json
+import asyncio
 
 # Add hologram_verification to path
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'hologram_verification', 'src'))
@@ -281,6 +286,149 @@ async def get_config():
         "feature_detector": "orb",
         "buffer_size": 30
     }
+
+
+@app.post("/verify_hologram_stream")
+async def verify_hologram_stream(video: UploadFile = File(...)):
+    """
+    Verify hologram with frame-by-frame streaming of annotated results.
+    
+    Returns a stream of JSON objects, each containing:
+    - frame_number: Current frame number
+    - total_frames: Total frames in video
+    - annotated_frame: Base64-encoded annotated frame image
+    - detections: List of hologram detections in this frame
+    - confidence: Overall confidence score so far
+    
+    This endpoint is useful for real-time visualization during testing.
+    """
+    logger.info(f"Received streaming verification request: {video.filename}")
+    
+    # Validate file
+    if not video.filename:
+        raise HTTPException(status_code=400, detail="No filename provided")
+    
+    file_ext = os.path.splitext(video.filename)[1].lower()
+    if file_ext not in SUPPORTED_FORMATS:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Unsupported video format. Supported: {SUPPORTED_FORMATS}"
+        )
+    
+    # Save video to temporary file
+    temp_video_path = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            delete=False,
+            suffix=file_ext,
+            prefix='hologram_stream_'
+        ) as temp_file:
+            content = await video.read()
+            temp_file.write(content)
+            temp_video_path = temp_file.name
+        
+        logger.info(f"Streaming video from: {temp_video_path}")
+        
+        async def generate_frames():
+            """Generator function that yields annotated frames"""
+            try:
+                cap = cv2.VideoCapture(temp_video_path)
+                if not cap.isOpened():
+                    yield json.dumps({"error": "Cannot open video file"}) + "\n"
+                    return
+                
+                total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+                frame_number = 0
+                all_confidences = []
+                
+                # Create a fresh verifier for this stream
+                stream_verifier = HologramVerifier(
+                    feature_detector='orb',
+                    buffer_size=30,
+                    update_interval=10,
+                    use_ml_classifier=False,
+                    confidence_threshold=CONFIDENCE_THRESHOLD
+                )
+                
+                while True:
+                    ret, frame = cap.read()
+                    if not ret:
+                        break
+                    
+                    frame_number += 1
+                    
+                    # Process frame
+                    annotated_frame, detections = stream_verifier.process_frame(frame)
+                    
+                    # Collect confidence scores
+                    for det in detections:
+                        all_confidences.append(det['confidence'])
+                    
+                    # Encode frame as JPEG
+                    _, buffer = cv2.imencode('.jpg', annotated_frame, [cv2.IMWRITE_JPEG_QUALITY, 85])
+                    frame_base64 = base64.b64encode(buffer).decode('utf-8')
+                    
+                    # Calculate average confidence
+                    avg_confidence = sum(all_confidences) / len(all_confidences) if all_confidences else 0.0
+                    
+                    # Prepare frame data
+                    frame_data = {
+                        "frame_number": frame_number,
+                        "total_frames": total_frames,
+                        "annotated_frame": frame_base64,
+                        "detections": detections,
+                        "detections_count": len(detections),
+                        "avg_confidence": float(avg_confidence),
+                        "progress": (frame_number / total_frames) * 100 if total_frames > 0 else 0
+                    }
+                    
+                    # Yield frame data as JSON
+                    yield json.dumps(frame_data) + "\n"
+                    
+                    # Small delay to prevent overwhelming the client
+                    await asyncio.sleep(0.01)
+                
+                cap.release()
+                
+                # Send final summary
+                final_data = {
+                    "done": True,
+                    "total_frames": frame_number,
+                    "total_detections": len(all_confidences),
+                    "avg_confidence": float(sum(all_confidences) / len(all_confidences)) if all_confidences else 0.0,
+                    "valid": (sum(all_confidences) / len(all_confidences) >= CONFIDENCE_THRESHOLD) if all_confidences else False
+                }
+                yield json.dumps(final_data) + "\n"
+                
+            except Exception as e:
+                logger.error(f"Error during streaming: {e}", exc_info=True)
+                yield json.dumps({"error": str(e)}) + "\n"
+            
+            finally:
+                # Cleanup temp file
+                if temp_video_path and os.path.exists(temp_video_path):
+                    try:
+                        os.remove(temp_video_path)
+                    except Exception as e:
+                        logger.warning(f"Failed to delete temp file: {e}")
+        
+        return StreamingResponse(
+            generate_frames(),
+            media_type="application/x-ndjson",
+            headers={
+                "Cache-Control": "no-cache",
+                "X-Accel-Buffering": "no"
+            }
+        )
+        
+    except Exception as e:
+        logger.error(f"Error setting up streaming: {e}", exc_info=True)
+        if temp_video_path and os.path.exists(temp_video_path):
+            try:
+                os.remove(temp_video_path)
+            except:
+                pass
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 if __name__ == "__main__":

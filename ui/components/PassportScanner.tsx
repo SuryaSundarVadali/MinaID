@@ -30,6 +30,10 @@ export default function PassportScanner({ onVerified, onError }: PassportScanner
   const videoInputRef = useRef<HTMLInputElement>(null);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const recordedChunksRef = useRef<Blob[]>([]);
+  const videoPreviewRef = useRef<HTMLVideoElement>(null);
+  const [videoPreviewUrl, setVideoPreviewUrl] = useState<string | null>(null);
+  const [recordingTime, setRecordingTime] = useState(0);
+  const recordingTimerRef = useRef<NodeJS.Timeout | null>(null);
 
   // Parse MRZ data
   const parseMRZ = (line1: string, line2: string): PassportData | null => {
@@ -293,6 +297,12 @@ export default function PassportScanner({ onVerified, onError }: PassportScanner
         audio: false 
       });
       
+      // Show live preview
+      if (videoPreviewRef.current) {
+        videoPreviewRef.current.srcObject = stream;
+        videoPreviewRef.current.play();
+      }
+      
       recordedChunksRef.current = [];
       const mediaRecorder = new MediaRecorder(stream, {
         mimeType: 'video/webm;codecs=vp9',
@@ -310,13 +320,32 @@ export default function PassportScanner({ onVerified, onError }: PassportScanner
         setHologramVideo(file);
         console.log('✅ Recording complete:', file.size, 'bytes');
         
-        // Stop all tracks
+        // Create preview URL for the recorded video
+        const url = URL.createObjectURL(blob);
+        setVideoPreviewUrl(url);
+        
+        // Stop all tracks and clear preview
         stream.getTracks().forEach(track => track.stop());
+        if (videoPreviewRef.current) {
+          videoPreviewRef.current.srcObject = null;
+        }
+        
+        // Clear timer
+        if (recordingTimerRef.current) {
+          clearInterval(recordingTimerRef.current);
+          recordingTimerRef.current = null;
+        }
       };
       
       mediaRecorderRef.current = mediaRecorder;
       mediaRecorder.start();
       setIsRecording(true);
+      setRecordingTime(0);
+      
+      // Start recording timer
+      recordingTimerRef.current = setInterval(() => {
+        setRecordingTime(prev => prev + 1);
+      }, 1000);
       
       // Auto-stop after 10 seconds
       setTimeout(() => {
@@ -336,6 +365,10 @@ export default function PassportScanner({ onVerified, onError }: PassportScanner
     if (mediaRecorderRef.current && mediaRecorderRef.current.state === 'recording') {
       mediaRecorderRef.current.stop();
       setIsRecording(false);
+    }
+    if (recordingTimerRef.current) {
+      clearInterval(recordingTimerRef.current);
+      recordingTimerRef.current = null;
     }
   };
 
@@ -421,6 +454,33 @@ export default function PassportScanner({ onVerified, onError }: PassportScanner
               🎥 Hologram Verification Video (Required)
             </label>
             
+            {/* Live/Recorded Video Preview */}
+            {(isRecording || videoPreviewUrl) && (
+              <div className="mb-4 relative">
+                <video
+                  ref={videoPreviewRef}
+                  autoPlay={isRecording}
+                  controls={!isRecording && !!videoPreviewUrl}
+                  src={!isRecording && videoPreviewUrl ? videoPreviewUrl : undefined}
+                  className="w-full rounded-lg bg-black"
+                  style={{ maxHeight: '400px' }}
+                />
+                {isRecording && (
+                  <div className="absolute top-3 left-3 bg-red-600 text-white px-3 py-1 rounded-full flex items-center gap-2 animate-pulse">
+                    <span className="w-3 h-3 bg-white rounded-full"></span>
+                    <span className="font-mono font-bold">{recordingTime}s</span>
+                  </div>
+                )}
+                {isRecording && (
+                  <div className="absolute bottom-3 left-0 right-0 text-center">
+                    <p className="bg-black bg-opacity-70 text-white px-4 py-2 rounded-lg inline-block">
+                      🔄 Tilt the passport slowly to capture the hologram effect
+                    </p>
+                  </div>
+                )}
+              </div>
+            )}
+            
             {hologramVideo ? (
               <div className="bg-green-50 border border-green-200 rounded-lg p-4">
                 <div className="flex items-center justify-between">
@@ -429,12 +489,18 @@ export default function PassportScanner({ onVerified, onError }: PassportScanner
                     <div>
                       <p className="font-medium text-green-900">{hologramVideo.name}</p>
                       <p className="text-sm text-green-700">
-                        {(hologramVideo.size / 1024 / 1024).toFixed(2)} MB
+                        {(hologramVideo.size / 1024 / 1024).toFixed(2)} MB · {recordingTime}s
                       </p>
                     </div>
                   </div>
                   <button
-                    onClick={() => setHologramVideo(null)}
+                    onClick={() => {
+                      setHologramVideo(null);
+                      if (videoPreviewUrl) {
+                        URL.revokeObjectURL(videoPreviewUrl);
+                        setVideoPreviewUrl(null);
+                      }
+                    }}
                     className="px-3 py-1 text-sm text-red-600 hover:bg-red-50 rounded transition-colors"
                   >
                     Remove
