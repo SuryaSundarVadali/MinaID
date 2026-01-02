@@ -128,12 +128,12 @@ export default function HologramTestingTool() {
         setRecordingTime(prev => prev + 1);
       }, 1000);
 
-      // Auto-stop after 10 seconds
+      // Auto-stop after 30 seconds
       setTimeout(() => {
         if (mediaRecorderRef.current?.state === 'recording') {
           stopRecording();
         }
-      }, 10000);
+      }, 30000);
 
     } catch (err) {
       console.error('Recording error:', err);
@@ -234,7 +234,7 @@ export default function HologramTestingTool() {
                   <ol className="text-sm text-blue-800 space-y-1 list-decimal list-inside">
                     <li>Position your passport with the hologram clearly visible</li>
                     <li>Click "Start Camera" to activate the live preview</li>
-                    <li>Click "Record & Test" to record a 10-second video</li>
+                    <li>Click "Record & Test" to record a 30-second video</li>
                     <li>Slowly tilt the passport during recording to capture the hologram effect</li>
                     <li>The system will automatically analyze the video after recording</li>
                     <li>View the detection results and confidence scores below</li>
@@ -272,7 +272,7 @@ export default function HologramTestingTool() {
                   {isRecording && (
                     <div className="absolute top-3 left-3 bg-red-600 text-white px-3 py-1 rounded-full flex items-center gap-2 animate-pulse z-10">
                       <span className="w-3 h-3 bg-white rounded-full"></span>
-                      <span className="font-mono font-bold">{recordingTime}s / 10s</span>
+                      <span className="font-mono font-bold">{recordingTime}s / 30s</span>
                     </div>
                   )}
                   
@@ -313,7 +313,7 @@ export default function HologramTestingTool() {
                             onClick={startRecording}
                             className="w-full px-4 py-3 bg-red-600 text-white rounded-lg font-medium hover:bg-red-700 transition-colors"
                           >
-                            ⏺ Record & Test (10s)
+                            ⏺ Record & Test (30s)
                           </button>
                           <button
                             onClick={stopStream}
@@ -473,7 +473,7 @@ export default function HologramTestingTool() {
                   </div>
                   <div className="flex justify-between">
                     <span className="text-gray-600">Recording Duration:</span>
-                    <span className="font-mono text-gray-900">10 seconds</span>
+                    <span className="font-mono text-gray-900">30 seconds</span>
                   </div>
                   <div className="flex justify-between">
                     <span className="text-gray-600">Detection Algorithm:</span>

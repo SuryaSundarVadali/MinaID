@@ -347,12 +347,12 @@ export default function PassportScanner({ onVerified, onError }: PassportScanner
         setRecordingTime(prev => prev + 1);
       }, 1000);
       
-      // Auto-stop after 10 seconds
+      // Auto-stop after 30 seconds
       setTimeout(() => {
         if (mediaRecorderRef.current?.state === 'recording') {
           stopRecording();
         }
-      }, 10000);
+      }, 30000);
       
     } catch (error) {
       console.error('Camera access error:', error);
@@ -511,7 +511,7 @@ export default function PassportScanner({ onVerified, onError }: PassportScanner
               <div className="space-y-3">
                 <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-3">
                   <p className="text-sm text-yellow-800">
-                    📹 <strong>Record a 5-10 second video</strong> showing the passport hologram from different angles.
+                    📹 <strong>Record a 30-second video</strong> showing the passport hologram from different angles.
                     Tilt the passport slowly to capture the hologram's dynamic optical effects.
                   </p>
                 </div>

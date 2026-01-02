@@ -156,7 +156,7 @@ export default function HologramStreamingTester() {
         if (mediaRecorderRef.current?.state === 'recording') {
           stopRecording();
         }
-      }, 10000);
+      }, 30000);
 
     } catch (err) {
       console.error('Recording error:', err);
@@ -294,7 +294,7 @@ export default function HologramStreamingTester() {
                   {isRecording && (
                     <div className="absolute top-3 left-3 bg-red-600 text-white px-3 py-1 rounded-full flex items-center gap-2 z-10">
                       <span className="w-3 h-3 bg-white rounded-full animate-pulse"></span>
-                      <span className="font-mono font-bold">{recordingTime}s / 10s</span>
+                      <span className="font-mono font-bold">{recordingTime}s / 30s</span>
                     </div>
                   )}
                   
@@ -324,7 +324,7 @@ export default function HologramStreamingTester() {
                             onClick={startRecording}
                             className="w-full px-4 py-3 bg-red-600 text-white rounded-lg font-medium hover:bg-red-700"
                           >
-                            ⏺ Record & Analyze (10s)
+                            ⏺ Record & Analyze (30s)
                           </button>
                           <button
                             onClick={stopStream}
