@@ -1,6 +1,3 @@
-# Ignore contracts directory for Vercel deployment
-contracts/
-
 # Node modules
 node_modules/
 
