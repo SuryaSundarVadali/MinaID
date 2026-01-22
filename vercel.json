@@ -2,14 +2,9 @@
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "version": 2,
   "regions": ["iad1"],
-  "buildCommand": "cd ui && npm run build:all",
+  "buildCommand": "npm --prefix ui run build:all",
   "outputDirectory": "ui/.next",
-  "installCommand": "npm install && cd contracts && npm install && cd ../ui && npm install",
-  "env": {
-    "NODE_ENV": "production",
-    "NEXT_PUBLIC_NETWORK": "devnet",
-    "NODE_OPTIONS": "--max-old-space-size=4096"
-  },
+  "installCommand": "npm --prefix contracts install && npm --prefix ui install",
   "headers": [
     {
       "source": "/(.*)",

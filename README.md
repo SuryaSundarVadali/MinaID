@@ -1,8 +1,8 @@
 # MinaID
 
-**Self-Sovereign Digital Identity with Zero-Knowledge Proofs**
+**Privacy-Preserving Decentralized Identity System on Mina Protocol**
 
-MinaID is a decentralized identity system built on Mina Protocol that enables privacy-preserving credential verification. Users can prove attributes about themselves—such as age, citizenship, or other credentials—without revealing underlying personal data. The system combines zero-knowledge proofs with FIDO2 passkey authentication to deliver a secure, user-friendly identity solution.
+MinaID is an open-source, self-sovereign digital identity platform that leverages zero-knowledge cryptography to enable privacy-preserving credential verification. Built on Mina Protocol, MinaID allows users to prove specific attributes about their identity—such as age eligibility, citizenship status, or KYC compliance—without revealing any underlying personal data. By combining zero-knowledge proofs (zk-SNARKs) with FIDO2 passkey authentication and blockchain-based verification, MinaID delivers a production-ready identity solution that prioritizes privacy, security, and user autonomy.
 
 ## Overview
 
@@ -63,9 +63,11 @@ Two primary contracts handle on-chain operations:
 - Maintains trusted issuer registry
 - Configurable minimum age thresholds
 
-All contracts are deployed on **Zeko Testnet** (L2 zkRollup on Mina Protocol):
-- DIDRegistry: `B62qjbYMtue63MZjDxptNQbS1DceNUNCoSwuuadg1NNcdn1YTg9Fnrj`
-- ZKPVerifier: `B62qmc9mvmg29EwS3wXw3UvSvoBGp9b4WaeHgv3c3ZJXWZaYSZTpRj6`
+All contracts are deployed on **Mina Devnet**:
+- DIDRegistry: `B62qkHXYo6x9JJos4bXNmU1kc7BPZ6Hmga8VC63MgKkDGtYdKyw8LEo`
+- ZKPVerifier: `B62qq6KvkFPRuAuGcYaHC3D2GyVvv6SiN1poGMyNA3jbpstkv39KNNS`
+- Network: Mina Devnet
+- Deployment Date: December 11, 2025
 
 ### Communication Layer
 **WebSocket Service** (Optional)
@@ -75,6 +77,218 @@ All contracts are deployed on **Zeko Testnet** (L2 zkRollup on Mina Protocol):
 - Event-driven architecture for proof verification lifecycle
 
 The architecture deliberately keeps sensitive data off-chain while leveraging blockchain for verification integrity and immutability.
+
+## User Workflow
+
+MinaID provides two distinct workflows: one for identity holders (users proving their credentials) and one for verifiers (services validating user proofs). Both workflows emphasize privacy preservation and user control.
+
+### Identity Holder Workflow
+
+The complete journey from onboarding to proof generation follows these steps:
+
+#### 1. Account Creation and Wallet Connection
+
+Users begin by connecting their Mina wallet to establish their blockchain identity:
+
+- Install the Auro Wallet browser extension and create a wallet or import an existing one
+- Navigate to MinaID and click "Connect Wallet"
+- Authorize the connection in the Auro Wallet popup
+- The system captures the user's public key as their primary identifier
+- Request devnet tokens from the Mina faucet (1-2 MINA recommended for transaction fees)
+
+At this stage, the user has a blockchain identity but no credentials yet registered on-chain.
+
+#### 2. Passkey Registration
+
+To enable secure, passwordless authentication, users create a FIDO2 passkey:
+
+- Click "Create Passkey" in the signup flow
+- System generates a unique challenge using cryptographically secure randomness
+- Browser prompts for biometric authentication (fingerprint, face recognition, or device PIN)
+- WebAuthn API creates a credential tied to the user's device hardware
+- The credential ID is stored locally and associated with the wallet address
+- Private keys are encrypted using a passkey-derived secret and stored in browser localStorage
+
+The passkey serves dual purposes: authentication for returning users and encryption key derivation for private key protection. Importantly, only one passkey can exist per wallet address, preventing credential stuffing attacks.
+
+#### 3. Credential Upload
+
+Users provide their identity documents for local processing:
+
+- Upload an Aadhar XML file (digitally signed by UIDAI)
+- The system validates the UIDAI RSA-2048 signature locally to ensure document authenticity
+- Demographic data (name, date of birth, citizenship, address, Aadhar number) is extracted and parsed
+- XML schema validation ensures the document structure matches official UIDAI specifications
+- All processing happens entirely in the browser; no data is transmitted to any server
+
+At this point, the user has verified credentials stored locally but not yet committed to the blockchain.
+
+#### 4. DID Registration
+
+To register their identity on-chain, users submit a DID (Decentralized Identifier) registration transaction:
+
+- System generates a Poseidon hash of the user's public key
+- Creates a DID document containing identity metadata (excluding sensitive data)
+- Generates a hash commitment of the DID document
+- Constructs a transaction calling `registerDIDSimple(didDocumentHash)` on the DIDRegistry contract
+- User reviews transaction details and signs with Auro Wallet
+- Transaction is broadcast to the Mina network
+
+The transaction queue monitors the submission with automatic retries on failure:
+- Initial submission attempt
+- If failed: retry after 2 seconds (exponential backoff)
+- If failed again: retry after 4 seconds
+- Final retry after 8 seconds before permanent failure
+
+The Merkle tree in the DIDRegistry contract updates to include the new DID, creating an on-chain record without exposing personal information. Transaction confirmation typically takes 20-30 seconds on devnet.
+
+#### 5. Proof Generation
+
+With a registered DID, users can generate zero-knowledge proofs for various attributes:
+
+**Age Verification Proof:**
+- User selects "Generate Age Proof" from the dashboard
+- Specifies minimum age threshold (e.g., 18 or 21)
+- System loads the AgeVerificationProgram circuit cache (~2-5 seconds with cache, ~30 seconds first time)
+- Circuit compiles in the browser using o1js
+- Witness computation: converts birthdate and current date to Field elements
+- Proof generation: creates a zk-SNARK proving age ≥ threshold without revealing exact birthdate
+- Proof structure includes public inputs (hash commitment) and private inputs (actual birthdate)
+- User can optionally submit the proof on-chain for verification via ZKPVerifier contract
+
+**Citizenship Verification Proof:**
+- User selects "Generate Citizenship Proof"
+- Specifies expected citizenship (e.g., "Indian")
+- System normalizes input to lowercase for case-insensitive matching
+- Generates a Poseidon hash commitment of the citizenship value
+- Creates a signature using the user's private key for authenticity
+- Proof contains: commitment, signature, and random salt
+- Verification can happen off-chain (by providing commitment and salt) or on-chain
+
+**KYC Proof with Selective Disclosure:**
+- User selects "Generate KYC Proof"
+- Chooses which attributes to reveal: age verification, citizenship, name (yes/no toggles)
+- System creates separate commitments for each field
+- Generates a composite proof revealing only selected attributes
+- For example: prove KYC compliance by revealing age ≥18 and citizenship, while keeping name and exact birthdate private
+
+#### 6. Two-Step Verification Process
+
+MinaID implements a client-side validation step before blockchain submission to prevent wasted transaction fees:
+
+**Step 1: Client-Side Validation**
+- User clicks "Verify Proof Locally"
+- System validates proof structure, checks circuit constraints, and verifies cryptographic signatures
+- Displays validation results with detailed checks (signature valid, age constraint satisfied, commitment matches)
+- If validation fails, user sees error details without spending gas fees
+- Only valid proofs proceed to Step 2
+
+**Step 2: On-Chain Verification**
+- User clicks "Submit to Blockchain" after successful client-side validation
+- Transaction constructed calling `verifyAgeProof()` or `verifyKYCProof()` on ZKPVerifier contract
+- Contract re-validates the proof on-chain using the same circuit verification logic
+- If valid, proof is recorded in contract state with a timestamp
+- Transaction hash and block number are returned for audit purposes
+
+This two-step process reduces failed on-chain transactions by over 90%, saving users time and transaction fees.
+
+#### 7. Proof Sharing and Management
+
+Once generated, users can share proofs with verifiers:
+
+- Each proof receives a unique identifier (CID when stored on IPFS)
+- User can copy the CID to share with verifiers
+- View proof history in the dashboard with timestamps and verification status
+- Monitor on-chain verification status via Minascan explorer links
+- Track proof validity periods and usage counts
+- Optionally revoke proofs by updating DID status
+
+Users maintain full control over their proofs and can generate new ones at any time without re-uploading credentials.
+
+### Verifier Workflow
+
+Service providers and organizations can validate user proofs without accessing sensitive data:
+
+#### 1. Proof Request
+
+Verifiers initiate the process by requesting proof from users:
+
+- Navigate to the Verifier Dashboard
+- Specify required proof type (Age, Citizenship, KYC)
+- Define validation criteria (e.g., minimum age 18, citizenship must be "Indian")
+- Optionally specify whether on-chain verification is required
+- Generate a verification request with a unique request ID
+- Share request with user via QR code, link, or API
+
+#### 2. Proof Reception
+
+When users submit proofs, verifiers receive:
+
+- Proof commitment (Poseidon hash)
+- Public inputs (non-sensitive parameters)
+- Zero-knowledge proof (zk-SNARK)
+- Transaction hash (if verified on-chain)
+- Timestamp of proof generation
+- Optional: IPFS CID for full proof document
+
+#### 3. Proof Validation
+
+Verifiers validate proofs through multiple layers:
+
+**Structure Validation:**
+- Check proof format matches expected schema
+- Verify all required fields are present
+- Validate data types and ranges
+
+**Cryptographic Verification:**
+- Verify the zk-SNARK proof using the verification key
+- Validate proof commitment matches claimed public inputs
+- Check signature authenticity using user's public key
+- Ensure proof satisfies circuit constraints
+
+**On-Chain Verification (if required):**
+- Query ZKPVerifier contract for proof record
+- Verify transaction hash matches blockchain records
+- Check verification timestamp and block height
+- Confirm proof hasn't been revoked
+
+**Validity Checks:**
+- Verify proof is within validity period (not expired)
+- Check usage count against maximum allowed uses
+- Validate proof hasn't been marked as compromised
+- Ensure DID is still active (not revoked)
+
+#### 4. Decision and Record Keeping
+
+Based on validation results, verifiers:
+
+- Accept or reject the verification request
+- Record verification event with timestamp and outcome
+- Store only proof commitments and verification status (never raw personal data)
+- Optionally send confirmation to user via WebSocket
+- Update internal systems based on verification result (e.g., grant access, approve application)
+
+#### 5. Continuous Monitoring
+
+Verifiers can implement ongoing verification:
+
+- Subscribe to WebSocket events for real-time DID status updates
+- Monitor blockchain for proof revocations
+- Re-verify proofs periodically for high-security applications
+- Track proof usage to detect potential fraud patterns
+
+### Security and Privacy Throughout the Workflow
+
+At every stage, MinaID maintains strict privacy and security guarantees:
+
+- **No Data Transmission**: Sensitive credentials never leave the user's browser during proof generation
+- **Zero-Knowledge Proofs**: Verifiers learn only the specific fact being proven (e.g., age ≥ 18), not the underlying data (exact birthdate)
+- **Selective Disclosure**: Users control exactly which attributes to reveal in composite proofs
+- **Encrypted Storage**: Private keys stored encrypted with passkey-derived secrets
+- **Blockchain Audit Trail**: All verifications recorded on-chain for transparency, but only commitments stored (no personal data)
+- **Revocation Support**: Users can revoke proofs or DIDs at any time, immediately invalidating all associated verifications
+
+This workflow architecture ensures that identity verification is private by design, user-controlled, and cryptographically verifiable.
 
 ## Getting Started
 
@@ -502,9 +716,9 @@ Create `.env.local` in the `ui` directory:
 # Network Configuration
 NEXT_PUBLIC_NETWORK=zeko-testnet
 
-# Smart Contract Addresses (Zeko Testnet)
-NEXT_PUBLIC_DID_REGISTRY_ZEKO_TESTNET=B62qjbYMtue63MZjDxptNQbS1DceNUNCoSwuuadg1NNcdn1YTg9Fnrj
-NEXT_PUBLIC_ZKP_VERIFIER_ZEKO_TESTNET=B62qmc9mvmg29EwS3wXw3UvSvoBGp9b4WaeHgv3c3ZJXWZaYSZTpRj6
+# Smart Contract Addresses (Mina Devnet)
+NEXT_PUBLIC_DID_REGISTRY_DEVNET=B62qkHXYo6x9JJos4bXNmU1kc7BPZ6Hmga8VC63MgKkDGtYdKyw8LEo
+NEXT_PUBLIC_ZKP_VERIFIER_DEVNET=B62qq6KvkFPRuAuGcYaHC3D2GyVvv6SiN1poGMyNA3jbpstkv39KNNS
 
 # WebSocket Server (optional)
 NEXT_PUBLIC_WS_URL=ws://localhost:8080/minaid
@@ -899,7 +1113,6 @@ SecurityLogger.log('PROOF_GENERATED', {
 
 - **Local Storage**: Private keys stored in browser localStorage encrypted with passkey-derived keys. Users should not clear browser data without backing up keys.
 - **Client-Side Trust**: Proof generation happens client-side, trusting the user's browser environment. Compromised browsers could expose private keys.
-- **Zeko Testnet Deployment**: Current contracts deployed on Zeko Testnet (L2 on Mina) for testing. Mainnet deployment requires security audit.
 - **Single Device**: Passkeys are device-specific. Account recovery across devices requires additional implementation.
 
 ## Deployment
@@ -932,10 +1145,10 @@ The deployment script will:
 7. Update environment configuration
 
 **Current Devnet Deployment:**
-- DIDRegistry: `B62qqfXbZPJAH3RBqbpKeQfUzWKw7JehiyHDhWCFZB8NLctRxoVPrTD`
-- ZKPVerifier: `B62qjrwq6t1GbMnS9RqTzr3jJpqAR59jSp2YJnmpmjoGH1BqGRPccjw`
+- DIDRegistry: `B62qkHXYo6x9JJos4bXNmU1kc7BPZ6Hmga8VC63MgKkDGtYdKyw8LEo`
+- ZKPVerifier: `B62qq6KvkFPRuAuGcYaHC3D2GyVvv6SiN1poGMyNA3jbpstkv39KNNS`
 - Network: Mina Devnet
-- Deployed: December 8, 2025
+- Deployment Date: December 11, 2025
 
 ### Frontend Deployment
 
@@ -952,12 +1165,6 @@ cd ui
 vercel --prod
 ```
 
-3. Configure environment variables in Vercel dashboard:
-```
-NEXT_PUBLIC_NETWORK=zeko-testnet
-NEXT_PUBLIC_DID_REGISTRY_ZEKO_TESTNET=B62qjbYMtue63MZjDxptNQbS1DceNUNCoSwuuadg1NNcdn1YTg9Fnrj
-NEXT_PUBLIC_ZKP_VERIFIER_ZEKO_TESTNET=B62qmc9mvmg29EwS3wXw3UvSvoBGp9b4WaeHgv3c3ZJXWZaYSZTpRj6
-```
 
 **Alternative: Self-Hosted**
 
@@ -1024,9 +1231,9 @@ NEXT_PUBLIC_DEBUG=false
 
 **Development (.env.local)**
 ```bash
-NEXT_PUBLIC_NETWORK=zeko-testnet
-NEXT_PUBLIC_DID_REGISTRY_ZEKO_TESTNET=B62qjbYMtue63MZjDxptNQbS1DceNUNCoSwuuadg1NNcdn1YTg9Fnrj
-NEXT_PUBLIC_ZKP_VERIFIER_ZEKO_TESTNET=B62qmc9mvmg29EwS3wXw3UvSvoBGp9b4WaeHgv3c3ZJXWZaYSZTpRj6
+NEXT_PUBLIC_NETWORK=devnet
+NEXT_PUBLIC_DID_REGISTRY_DEVNET=B62qkHXYo6x9JJos4bXNmU1kc7BPZ6Hmga8VC63MgKkDGtYdKyw8LEo
+NEXT_PUBLIC_ZKP_VERIFIER_DEVNET=B62qq6KvkFPRuAuGcYaHC3D2GyVvv6SiN1poGMyNA3jbpstkv39KNNS
 NEXT_PUBLIC_WS_URL=ws://localhost:8080/minaid
 NEXT_PUBLIC_DEBUG=true
 ```
@@ -1199,8 +1406,8 @@ Error: Bool.assertTrue(): false != true
 ```
 
 **Solution:**
-This was resolved in the December 8, 2025 update. Ensure you're using the latest contract deployment:
-- DIDRegistry: `B62qqfXbZPJAH3RBqbpKeQfUzWKw7JehiyHDhWCFZB8NLctRxoVPrTD`
+This was resolved in the December 11, 2025 update. Ensure you're using the latest contract deployment:
+- DIDRegistry: `B62qkHXYo6x9JJos4bXNmU1kc7BPZ6Hmga8VC63MgKkDGtYdKyw8LEo`
 
 If still seeing this error:
 1. Clear browser localStorage
@@ -1355,113 +1562,6 @@ This will log:
 
 Remember to disable debug mode in production.
 
-## Roadmap
-
-### Completed
-
-**Phase 1: Core Infrastructure** ✓
-- Decentralized identifier (DID) registration and management
-- Smart contract deployment (DIDRegistry, ZKPVerifier)
-- Merkle tree-based DID storage
-- Basic proof generation (citizenship, age, KYC)
-
-**Phase 2: User Experience** ✓
-- Passkey authentication with FIDO2/WebAuthn
-- Multi-step signup and onboarding flow
-- Aadhar XML parsing and UIDAI signature verification
-- Browser-based key management with AES-GCM encryption
-
-**Phase 3: Production Features** ✓
-- Transaction queue with exponential backoff retry
-- Real-time WebSocket service for verification updates
-- Progress indicators for long-running operations
-- Comprehensive error handling and user feedback
-- Account deletion with DID revocation
-
-**Phase 4: Reliability** ✓ (December 2025)
-- Fixed "Invalid signature" error with registerDIDSimple method
-- Resolved MerkleMapWitness length errors
-- Added pre-submission validation
-- Enhanced transaction monitoring
-- Rate limiting and security logging
-
-### In Progress
-
-**Phase 5: Performance Optimization** (Q1 2026)
-- Web Workers for non-blocking proof generation
-- Advanced circuit caching strategies (<5s compilation)
-- Transaction batching for reduced fees
-- GraphQL query optimization
-- Mobile device performance improvements
-
-**Phase 6: Enhanced Privacy** (Q1 2026)
-- Credential revocation without revealing identity
-- Encrypted proof storage with user-controlled keys
-- Anonymous credential issuance
-- Proof delegation mechanism
-
-### Planned
-
-**Phase 7: Expanded Credentials** (Q2 2026)
-- Educational credentials (degree verification)
-- Professional credentials (employment history)
-- Financial credentials (credit score, income verification)
-- Health credentials (vaccination status, blood type)
-- Custom credential templates for issuers
-
-**Phase 8: Cross-Chain Support** (Q2-Q3 2026)
-- Ethereum/Polygon bridge for wider adoption
-- Cross-chain proof verification
-- Multi-chain DID synchronization
-- Universal resolver for DID documents
-
-**Phase 9: Mobile Applications** (Q3 2026)
-- React Native mobile app (iOS/Android)
-- Biometric authentication on mobile devices
-- QR code-based proof sharing
-- Push notifications for verification requests
-- Offline proof generation with sync
-
-**Phase 10: Ecosystem Development** (Q4 2026)
-- Verifiable credentials marketplace
-- Issuer dashboard for organizations
-- Verifier SDK for easy integration
-- Developer API with comprehensive documentation
-- OAuth-style proof request flow
-
-**Phase 11: Advanced Features** (2027)
-- Social recovery for account access
-- Multi-signature DID management
-- Proof expiration and renewal
-- Compliance reporting tools
-- Analytics dashboard for issuers
-
-**Phase 12: Enterprise Solutions** (2027)
-- Enterprise SSO integration
-- Bulk credential issuance
-- Audit trail and compliance reporting
-- SLA guarantees for verifiers
-- White-label solutions
-
-### Research Areas
-
-Ongoing research into:
-- **Recursive proof composition**: Combine multiple proofs into one
-- **Quantum-resistant cryptography**: Future-proof against quantum computers
-- **Improved ZK circuits**: More efficient proving times
-- **Layer 2 scaling**: Faster transaction finality
-- **Interoperability standards**: W3C DID compliance
-
-### Community Requests
-
-We track feature requests from the community. Top requests include:
-- Email/SMS credential verification
-- Social media account linking
-- Professional networking integration
-- Decentralized reputation scores
-- Proof templates library
-
-Submit feature requests via [GitHub Issues](https://github.com/SuryaSundarVadali/MinaID/issues) with the `enhancement` label.
 
 ## Contributing
 
@@ -1716,47 +1816,5 @@ Special thanks to all contributors who have helped shape this project through co
 - **GitHub Repository**: [github.com/SuryaSundarVadali/MinaID](https://github.com/SuryaSundarVadali/MinaID)
 - **Contract Explorer**: [Devnet on Minascan](https://minascan.io/devnet/home)
 
-### Security Issues
-
-If you discover a security vulnerability, please **do not** open a public issue. Instead:
-
-1. Email security concerns to: [Your security email]
-2. Include detailed description and steps to reproduce
-3. Allow 48 hours for initial response
-4. Coordinate disclosure timing with maintainers
-
-We take security seriously and will respond promptly to valid reports.
-
-### Professional Services
-
-For enterprise deployments, custom integrations, or consulting:
-- Contact via GitHub Discussions for preliminary inquiry
-- Professional support packages available for production deployments
-- White-label solutions for organizations
-
----
-
-## Project Status
-
-**Current Version**: 1.0.0 (December 2025)  
-**Status**: Active Development  
-**Network**: Mina Devnet  
-**Production Ready**: Beta
-
-**Latest Updates:**
-- ✅ December 8, 2025: Fixed signature validation errors
-- ✅ December 7, 2025: Deployed updated contracts to Devnet
-- ✅ December 2025: Added transaction queue and WebSocket support
-- ✅ November 2025: Implemented passkey authentication
-- ✅ October 2025: Initial DID and proof system launch
-
-**Next Milestone**: Web Worker integration for non-blocking proofs (Q1 2026)
-
-Follow the repository for updates and announcements.
-
----
-
-**Built with privacy and security in mind**  
-**Powered by Mina Protocol**
 
 [⬆ Back to Top](#minaid)

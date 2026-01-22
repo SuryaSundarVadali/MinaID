@@ -232,9 +232,12 @@ export async function submitTransaction(
     
     console.log(`[RobustTransactionSubmitter] Attempt ${attempts}/${MAX_RETRIES}`);
     
+    // Store transaction reference for cleanup
+    let transactionJSON: any = null;
+    
     try {
       // Build transaction
-      const transactionJSON = await withTimeout(
+      transactionJSON = await withTimeout(
         transactionBuilder(),
         TRANSACTION_TIMEOUT_MS,
         'Transaction build timeout'
@@ -274,6 +277,9 @@ export async function submitTransaction(
       };
       
     } catch (error) {
+      // Clean up transaction on error
+      transactionJSON = null;
+      
       const errorMessage = error instanceof Error ? error.message : String(error);
       lastError = errorMessage;
       lastErrorType = categorizeError(errorMessage);
@@ -282,6 +288,21 @@ export async function submitTransaction(
       console.log(`[RobustTransactionSubmitter] Error type: ${lastErrorType}`);
       
       callbacks?.onError?.(errorMessage, lastErrorType);
+      
+      // Check if it's the nested transaction error - treat as transient
+      if (errorMessage.includes('Cannot start new transaction within another transaction')) {
+        console.log('[RobustTransactionSubmitter] Nested transaction detected, waiting before retry...');
+        lastErrorType = 'transient';
+        
+        // Wait a bit longer to ensure transaction context is cleared
+        if (attempts < MAX_RETRIES) {
+          const delay = Math.max(2000, calculateDelay(attempts));
+          console.log(`[RobustTransactionSubmitter] Extended delay: ${delay}ms for transaction cleanup...`);
+          callbacks?.onRetry?.(delay, errorMessage);
+          await sleep(delay);
+        }
+        continue;
+      }
       
       // Don't retry permanent errors
       if (lastErrorType === 'permanent') {
