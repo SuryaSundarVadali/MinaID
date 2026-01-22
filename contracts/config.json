@@ -2,7 +2,7 @@
   "version": 1,
   "deployAliases": {},
   "deployer": {
-    "privateKey": "EKEpKAJmk5UqjTVbXgWHoyWWTAx7PWbuxnd8gLh4kkNX7ESTdWFY",
+    "privateKey": "--privateKey--",
     "publicKey": "B62qqWYLoCqdYTbBBEYBfyabrkWtAiNamjCsf3en5QiHE7d4irz2UN5"
   },
   "contracts": {
