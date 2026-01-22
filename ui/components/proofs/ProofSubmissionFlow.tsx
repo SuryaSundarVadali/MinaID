@@ -422,7 +422,7 @@ export default function ProofSubmissionFlow({
 
           {txHash && (
             <a
-              href={`https://minascan.io/devnet/tx/${txHash}?type=zk-tx`}
+              href={`https://devnet.blockberry.one/mina/transaction/${txHash}`}
               target="_blank"
               rel="noopener noreferrer"
               className="inline-block px-4 py-2 bg-blue-600 text-white rounded-md 

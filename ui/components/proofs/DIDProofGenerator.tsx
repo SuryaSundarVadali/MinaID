@@ -567,7 +567,13 @@ export default function DIDProofGenerator({ proofType = 'citizenship' }: DIDProo
 
       setState(prev => ({ ...prev, ipfsCID: result.cid, isUploadingIPFS: false }));
       
-      alert(`✅ Proof uploaded to IPFS!\n\nCID: ${result.cid}\n\nShare this CID with verifiers to access your proof.`);
+      // Display wallet address with CID for sharing
+      alert(
+        `✅ Proof uploaded to IPFS!\n\n` +
+        `CID: ${result.cid}\n\n` +
+        `🔑 Wallet Address: ${userIdentifier}\n\n` +
+        `Share BOTH the CID and wallet address with verifiers to access your proof.`
+      );
     } catch (error: any) {
       console.error('[DIDProofGenerator] IPFS upload failed:', error);
       setState(prev => ({ ...prev, isUploadingIPFS: false }));
@@ -799,12 +805,63 @@ export default function DIDProofGenerator({ proofType = 'citizenship' }: DIDProo
                   <h3 className="font-semibold text-purple-900 mb-2 flex items-center gap-2">
                     ☁️ Uploaded to IPFS
                   </h3>
-                  <p className="text-sm text-purple-800 mb-2 font-mono break-all">
-                    CID: {state.ipfsCID}
-                  </p>
-                  <p className="text-xs text-purple-700">
-                    Share this CID with verifiers to access your proof securely.
-                  </p>
+                  <div className="space-y-3">
+                    <div>
+                      <div className="flex items-center justify-between mb-1">
+                        <p className="text-xs text-purple-600 font-semibold">CID:</p>
+                        <button
+                          onClick={async () => {
+                            try {
+                              await navigator.clipboard.writeText(state.ipfsCID!);
+                              const toast = (await import('react-hot-toast')).default;
+                              toast.success('CID copied!');
+                            } catch (error) {
+                              const toast = (await import('react-hot-toast')).default;
+                              toast.error('Failed to copy');
+                            }
+                          }}
+                          className="px-2 py-1 text-xs bg-purple-600 text-white rounded hover:bg-purple-700 transition-colors flex items-center gap-1"
+                        >
+                          <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
+                          </svg>
+                          Copy
+                        </button>
+                      </div>
+                      <p className="text-sm text-purple-800 font-mono break-all bg-white px-3 py-2 rounded">
+                        {state.ipfsCID}
+                      </p>
+                    </div>
+                    <div>
+                      <div className="flex items-center justify-between mb-1">
+                        <p className="text-xs text-purple-600 font-semibold">Wallet Address (for decryption):</p>
+                        <button
+                          onClick={async () => {
+                            try {
+                              await navigator.clipboard.writeText(userIdentifier!);
+                              const toast = (await import('react-hot-toast')).default;
+                              toast.success('Wallet address copied!');
+                            } catch (error) {
+                              const toast = (await import('react-hot-toast')).default;
+                              toast.error('Failed to copy');
+                            }
+                          }}
+                          className="px-2 py-1 text-xs bg-purple-600 text-white rounded hover:bg-purple-700 transition-colors flex items-center gap-1"
+                        >
+                          <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
+                          </svg>
+                          Copy
+                        </button>
+                      </div>
+                      <p className="text-sm text-purple-800 font-mono break-all bg-white px-3 py-2 rounded">
+                        {userIdentifier}
+                      </p>
+                    </div>
+                    <p className="text-xs text-purple-700">
+                      ⚠️ Share BOTH the CID and wallet address with verifiers to access your proof securely.
+                    </p>
+                  </div>
                 </div>
               )}
 

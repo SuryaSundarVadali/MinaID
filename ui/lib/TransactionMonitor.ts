@@ -164,124 +164,17 @@ export class TransactionMonitor {
 }
 
 /**
- * Helper to check Mina transaction status using Blockberry API with GraphQL fallback
+ * Helper to check Mina transaction status using Blockberry API
  */
 export async function checkMinaTransaction(
   txHash: string,
-  graphqlEndpoint: string = 'https://api.minascan.io/node/devnet/v1/graphql'
+  _graphqlEndpoint?: string // kept for API compatibility but not used
 ): Promise<{ included: boolean; failed?: boolean; error?: string }> {
   try {
-    // Primary: Try Blockberry API
-    const blockberryKey = process.env.NEXT_PUBLIC_BLOCKBERRY_API_KEY;
-    if (blockberryKey) {
-      const bbResult = await checkBlockberryTransaction(txHash, blockberryKey);
-      // Only return immediately if we get a definitive result
-      if (bbResult.included || bbResult.failed) {
-        return bbResult;
-      }
-    }
-
-    // Fallback: Use GraphQL Archive Node
-    // First check if transaction is in mempool
-    const mempoolQuery = `
-      query CheckMempool($hash: String!) {
-        pooledZkappCommands(hashes: [$hash]) {
-          hash
-          failureReason
-        }
-      }
-    `;
-
-    const response = await fetch(graphqlEndpoint, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        query: mempoolQuery,
-        variables: { hash: txHash }
-      })
-    });
-
-    const mempoolData = await response.json();
-    
-    if (mempoolData.data?.pooledZkappCommands?.length > 0) {
-      const pooledCmd = mempoolData.data.pooledZkappCommands[0];
-      if (pooledCmd.failureReason) {
-        return { included: false, failed: true, error: JSON.stringify(pooledCmd.failureReason) };
-      }
-      // In mempool, still pending
-      return { included: false };
-    }
-
-    // If not in mempool, check if included in a block using bestChain
-    const query = `
-      query GetTransaction($hash: String!) {
-        bestChain(maxLength: 290) {
-          protocolState {
-            consensusState {
-              blockHeight
-            }
-          }
-          transactions {
-            zkappCommands {
-              hash
-              failureReason {
-                failures
-                index
-              }
-            }
-          }
-        }
-      }
-    `;
-
-    const chainResponse = await fetch(graphqlEndpoint, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        query,
-        variables: { hash: txHash }
-      })
-    });
-
-    const data = await chainResponse.json();
-    
-    if (data.errors) {
-      console.warn('[checkMinaTransaction] GraphQL errors:', data.errors);
-      return { included: false };
-    }
-    
-    const blocks = data?.data?.bestChain || [];
-    
-    // Search through recent blocks for our transaction
-    for (const block of blocks) {
-      const zkappCommands = block.transactions?.zkappCommands || [];
-      const tx = zkappCommands.find((cmd: any) => cmd.hash === txHash);
-      
-      if (tx) {
-        const blockHeight = parseInt(block.protocolState?.consensusState?.blockHeight || '0');
-    
-        // Check for failure reason
-        if (tx.failureReason) {
-          let reason = 'Unknown failure';
-          try {
-            if (Array.isArray(tx.failureReason.failures)) {
-              reason = tx.failureReason.failures.join(', ');
-            } else {
-              reason = JSON.stringify(tx.failureReason);
-            }
-          } catch (e) {
-            reason = 'Failed (parsing error)';
-          }
-          return { included: false, failed: true, error: reason };
-        }
-        
-        // Transaction found and no failure - it's included!
-        return { included: true };
-      }
-    }
-    
-    // Not found in recent blocks - still pending
-    return { included: false };
+    // Use Blockberry API for all transaction monitoring
+    const blockberryKey = process.env.NEXT_PUBLIC_BLOCKBERRY_API_KEY || 'lTArAoBso7ZH6eH4dhCRFFa5runKoS';
+    const bbResult = await checkBlockberryTransaction(txHash, blockberryKey);
+    return bbResult;
   } catch (error) {
     console.warn('[checkMinaTransaction] Error:', error);
     return { included: false };

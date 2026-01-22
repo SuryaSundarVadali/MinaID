@@ -1,15 +1,13 @@
 /**
  * CompleteTransactionMonitor.ts
- * Monitors transaction status using Blockberry API (primary) and Minascan Archive (fallback).
+ * Monitors transaction status using Minascan GraphQL API
  */
 
 import { notify } from './ToastNotifications';
-import { checkBlockberryTransaction } from './BlockberryMonitor';
 
-// Use Minascan GraphQL endpoint for queries (it works)
+// Use Minascan GraphQL endpoint for transaction monitoring
 const GRAPHQL_ENDPOINT = 'https://api.minascan.io/node/devnet/v1/graphql';
-// Use MinaExplorer for UI links (better explorer interface)
-const EXPLORER_BASE_URL = 'https://devnet.minaexplorer.com';
+const EXPLORER_BASE_URL = 'https://minascan.io';
 
 // Monitoring configuration
 const POLL_INTERVAL_MS = 5000; // 5 seconds - check frequently for blockchain confirmation
@@ -45,47 +43,12 @@ export interface MonitoringCallbacks {
 }
 
 /**
- * Check MinaExplorer API for transaction
- */
-async function checkMinaExplorer(
-  txHash: string
-): Promise<{ found: boolean; canonical: boolean; blockHeight?: number; failureReason?: string }> {
-  try {
-    const response = await fetch(`${EXPLORER_BASE_URL}/transaction/${txHash}`);
-    if (!response.ok) {
-      return { found: false, canonical: false };
-    }
-    
-    // If we get a successful response, the transaction exists on MinaExplorer
-    // We'll still need to query GraphQL for detailed status
-    return { found: true, canonical: true };
-  } catch (error) {
-    console.warn('[checkMinaExplorer] Error:', error);
-    return { found: false, canonical: false };
-  }
-}
-
-/**
- * Query transaction status using Blockberry API with GraphQL fallback
+ * Query transaction status using Minascan GraphQL API
  */
 async function queryTransactionStatus(
   txHash: string
 ): Promise<{ status: TxStatus; blockHeight?: number; failureReason?: string }> {
   try {
-    // 1. Primary: Try Blockberry API
-    const NEXT_PUBLIC_BLOCKBERRY_API_KEY = 'lTArAoBso7ZH6eH4dhCRFFa5runKoS';
-    
-    if (NEXT_PUBLIC_BLOCKBERRY_API_KEY) {
-      const bbResult = await checkBlockberryTransaction(txHash, NEXT_PUBLIC_BLOCKBERRY_API_KEY);
-      if (bbResult.included) {
-        return { status: 'included', blockHeight: bbResult.data?.blockHeight || 0 };
-      }
-      if (bbResult.failed) {
-        return { status: 'failed', failureReason: bbResult.error };
-      }
-    }
-
-    // 2. Fallback: Use Minascan Archive GraphQL
     // First check mempool
     const mempoolResponse = await fetch(GRAPHQL_ENDPOINT, {
       method: 'POST',
@@ -113,12 +76,10 @@ async function queryTransactionStatus(
       return { status: 'in_mempool' };
     }
     
-    // If not in mempool, check bestChain for included transactions
+    // Check bestChain for included transactions
     const response = await fetch(GRAPHQL_ENDPOINT, {
       method: 'POST',
-      headers: { 
-        'Content-Type': 'application/json',
-      },
+      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         query: `
           query GetTransaction($hash: String!) {
@@ -151,7 +112,6 @@ async function queryTransactionStatus(
       return { status: 'unknown' };
     }
     
-    // Parse bestChain blocks
     const blocks = result.data?.bestChain || [];
     
     // Search through recent blocks for our transaction
@@ -162,9 +122,7 @@ async function queryTransactionStatus(
       if (tx) {
         const blockHeight = parseInt(block.protocolState?.consensusState?.blockHeight || '0');
         
-        console.log(`[TransactionMonitor] Transaction found in block ${blockHeight}`);
-        
-        // Check for failure reason safely
+        // Check for failure reason
         if (tx.failureReason) {
           let reason = 'Unknown failure';
           try {
@@ -182,52 +140,11 @@ async function queryTransactionStatus(
       }
     }
     
-    // Not found in mempool or recent blocks (likely still pending)
+    // Not found - still pending
     return { status: 'pending' };
-    
   } catch (error) {
-    console.warn('[TransactionMonitor] Query error:', error);
+    console.error('[queryTransactionStatus] Error:', error);
     return { status: 'unknown' };
-  }
-}
-
-/**
- * Query latest block height for confirmation count
- */
-async function queryLatestBlockHeight(): Promise<number | null> {
-  try {
-    const response = await fetch(GRAPHQL_ENDPOINT, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        query: `
-          query {
-            bestChain(maxLength: 1) {
-              protocolState {
-                consensusState {
-                  blockHeight
-                }
-              }
-            }
-          }
-        `,
-      }),
-    });
-    
-    const result = await response.json();
-    const blockHeight = result.data?.bestChain?.[0]?.protocolState?.consensusState?.blockHeight;
-    
-    if (blockHeight) {
-      const height = parseInt(blockHeight);
-      console.log(`[TransactionMonitor] Latest block height: ${height}`);
-      return height;
-    }
-    
-    return null;
-    
-  } catch (error) {
-    console.warn('[TransactionMonitor] Failed to query latest block height:', error);
-    return null;
   }
 }
 
@@ -319,9 +236,9 @@ export async function monitorTransaction(
           
         case 'included':
           blockHeight = statusResult.blockHeight;
-          const explorerUrl = `${EXPLORER_BASE_URL}/transaction/${txHash}`;
+          const explorerUrl = `${EXPLORER_BASE_URL}/devnet/tx/${txHash}?type=zk-tx`;
           callbacks?.onStatusChange?.('included', `Included in block ${blockHeight}. View: ${explorerUrl}`);
-          console.log(`[TransactionMonitor] 🔗 MinaExplorer: ${explorerUrl}`);
+          console.log(`[TransactionMonitor] 🔗 Minascan: ${explorerUrl}`);
           break;
           
         case 'failed':
@@ -354,10 +271,10 @@ export async function monitorTransaction(
         if (confirmations >= requiredConfirmations) {
           console.log(`[TransactionMonitor] ✅ Confirmed! ${confirmations} confirmations`);
           
-          const explorerUrl = `${EXPLORER_BASE_URL}/transaction/${txHash}`;
-          console.log(`[TransactionMonitor] 🔗 View on MinaExplorer: ${explorerUrl}`);
+          const explorerUrl = `${EXPLORER_BASE_URL}/devnet/tx/${txHash}?type=zk-tx`;
+          console.log(`[TransactionMonitor] 🔗 View on Minascan: ${explorerUrl}`);
           
-          callbacks?.onStatusChange?.('confirmed', `Confirmed with ${confirmations} confirmations. View on MinaExplorer!`);
+          callbacks?.onStatusChange?.('confirmed', `Confirmed with ${confirmations} confirmations. View on Minascan!`);
           
           callbacks?.onConfirmed?.({
             status: 'confirmed',
@@ -429,4 +346,43 @@ export function estimateConfirmationTime(): {
     maxTime: 10 * 60 * 1000, 
     averageTime: 5 * 60 * 1000, 
   };
+}
+
+/**
+ * Query the latest block height from Minascan GraphQL
+ */
+async function queryLatestBlockHeight(): Promise<number | null> {
+  try {
+    const response = await fetch(GRAPHQL_ENDPOINT, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        query: `
+          query {
+            bestChain(maxLength: 1) {
+              protocolState {
+                consensusState {
+                  blockHeight
+                }
+              }
+            }
+          }
+        `,
+      }),
+    });
+    
+    const result = await response.json();
+    const blockHeight = result.data?.bestChain?.[0]?.protocolState?.consensusState?.blockHeight;
+    
+    if (blockHeight) {
+      const height = parseInt(blockHeight);
+      console.log(`[TransactionMonitor] Latest block height: ${height}`);
+      return height;
+    }
+    
+    return null;
+  } catch (error) {
+    console.error('[queryLatestBlockHeight] Error:', error);
+    return null;
+  }
 }

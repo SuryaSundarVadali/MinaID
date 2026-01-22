@@ -46,8 +46,8 @@ export const DEFAULT_CONFIG: NetworkConfig = {
   minaEndpoint: 'https://api.minascan.io/node/devnet/v1/graphql',
   archiveEndpoint: 'https://api.minascan.io/archive/devnet/v1/graphql',
   // Deployed Dec 11, 2025 - Latest deployment
-  didRegistryAddress: 'B62qmv8SmrThvLXaH5zN1eKhPMEEL22coRaeezFM8f4yWNGj6CJ13EH',
-  zkpVerifierAddress: 'B62qjxzdqgsRhxMSsUSEYFTdHwqRd7TY9Cu1SLmfECYnaktL1xbW5Sz',
+  didRegistryAddress: 'B62qkHXYo6x9JJos4bXNmU1kc7BPZ6Hmga8VC63MgKkDGtYdKyw8LEo',
+  zkpVerifierAddress: 'B62qq6KvkFPRuAuGcYaHC3D2GyVvv6SiN1poGMyNA3jbpstkv39KNNS',
 };
 
 // OLD/DEPRECATED contract addresses - DO NOT USE
@@ -81,13 +81,13 @@ export interface TransactionResult {
 }
 
 /**
- * Get Mina Explorer URL for transaction
+ * Get block explorer URL for transaction
  */
 export function getExplorerUrl(txHash: string, network: string = 'devnet'): string {
   if (network === 'zeko-testnet') {
     return `https://zekoscan.io/testnet/tx/${txHash}`;
   }
-  return `https://minascan.io/${network}/tx/${txHash}`;
+  return `https://minascan.io/${network}/tx/${txHash}?type=zk-tx`;
 }
 
 export interface DIDStatus {
@@ -1222,33 +1222,35 @@ export class ContractInterface {
     const verifier = PublicKey.fromBase58(verifierAddress);
     const proofType = zkProofData.proofType;
 
-    // Build transaction based on proof type
-    const tx = await Mina.transaction(
-      { sender: verifier, fee: 100_000_000 },
-      async () => {
-        // Validate inputs
-        if (!zkProofData.publicInput) throw new Error('Missing publicInput in proof data');
-        if (!zkProofData.publicOutput) throw new Error('Missing publicOutput in proof data');
+    // Wrap transaction building in try-catch to handle any nested transaction errors
+    try {
+      // Build transaction based on proof type
+      const tx = await Mina.transaction(
+        { sender: verifier, fee: 100_000_000 },
+        async () => {
+          // Validate inputs
+          if (!zkProofData.publicInput) throw new Error('Missing publicInput in proof data');
+          if (!zkProofData.publicOutput) throw new Error('Missing publicOutput in proof data');
 
-        const subject = PublicKey.fromBase58(zkProofData.publicInput.subjectPublicKey);
-        const commitment = Field(zkProofData.publicOutput);
-        const issuer = PublicKey.fromBase58(zkProofData.publicInput.issuerPublicKey);
-        const timestamp = Field(zkProofData.publicInput.timestamp || 0);
-        
-        if (proofType.startsWith('age') || proofType === 'age18' || proofType === 'age21') {
-          // Age proof verification
-          const ageHash = Field(zkProofData.publicInput.ageHash || zkProofData.publicInput.kycHash || '0');
-          const minimumAge = Field(zkProofData.publicInput.minimumAge || '18');
+          const subject = PublicKey.fromBase58(zkProofData.publicInput.subjectPublicKey);
+          const commitment = Field(zkProofData.publicOutput);
+          const issuer = PublicKey.fromBase58(zkProofData.publicInput.issuerPublicKey);
+          const timestamp = Field(zkProofData.publicInput.timestamp || 0);
           
-          await this.zkpVerifier!.verifyAgeProof(
-            subject,
-            ageHash,
-            commitment,
-            issuer,
-            timestamp,
-            minimumAge
-          );
-        } else if (proofType === 'citizenship' || proofType === 'name') {
+          if (proofType.startsWith('age') || proofType === 'age18' || proofType === 'age21') {
+            // Age proof verification
+            const ageHash = Field(zkProofData.publicInput.ageHash || zkProofData.publicInput.kycHash || '0');
+            const minimumAge = Field(zkProofData.publicInput.minimumAge || '18');
+            
+            await this.zkpVerifier!.verifyAgeProof(
+              subject,
+              ageHash,
+              commitment,
+              issuer,
+              timestamp,
+              minimumAge
+            );
+          } else if (proofType === 'citizenship' || proofType === 'name') {
           // Citizenship/Name proof verification
           const dataHash = Field(zkProofData.publicInput.citizenshipHash || zkProofData.publicInput.nameHash || '0');
           
@@ -1320,7 +1322,18 @@ export class ContractInterface {
       }
     );
 
-    return tx;
+      return tx;
+    
+    } catch (error: any) {
+      // Handle nested transaction error specifically
+      if (error.message?.includes('Cannot start new transaction within another transaction')) {
+        console.error('[ContractInterface] Nested transaction error detected. This usually means a previous transaction context was not properly cleaned up.');
+        // Re-throw with more context
+        throw new Error('Transaction context conflict. Please try again.');
+      }
+      // Re-throw other errors
+      throw error;
+    }
   }
 
   /**

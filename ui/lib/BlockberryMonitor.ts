@@ -1,4 +1,3 @@
-import { TransactionResult } from './TransactionMonitor';
 
 const BLOCKBERRY_API_BASE = 'https://api.blockberry.one/mina-devnet/v1';
 
@@ -17,9 +16,11 @@ interface BlockberryZkAppTransaction {
 export async function checkBlockberryTransaction(
   txHash: string,
   apiKey: string
-): Promise<{ included: boolean; failed?: boolean; error?: string; data?: any }> {
+): Promise<{ included: boolean; failed?: boolean; error?: string; data?: any; pending?: boolean }> {
   try {
-    // Use the zkApps-specific endpoint
+    console.log('[checkBlockberryTransaction] Fetching tx:', txHash);
+    
+    // Use the correct zkApps endpoint (without /raw/)
     const response = await fetch(`${BLOCKBERRY_API_BASE}/zkapps/txs/${txHash}`, {
       method: 'GET',
       headers: {
@@ -28,10 +29,12 @@ export async function checkBlockberryTransaction(
       }
     });
 
+    console.log('[checkBlockberryTransaction] Response status:', response.status);
+
     if (!response.ok) {
       if (response.status === 404) {
-        // Transaction not found yet
-        return { included: false };
+        console.log('[checkBlockberryTransaction] Transaction not found yet (404) - still pending');
+        return { included: false, pending: true };
       }
       console.warn('[checkBlockberryTransaction] API error:', response.status, response.statusText);
       return { included: false };
@@ -39,26 +42,35 @@ export async function checkBlockberryTransaction(
 
     // Check for empty response
     const text = await response.text();
+    console.log('[checkBlockberryTransaction] Response text length:', text.length);
+    
     if (!text) {
-      return { included: false };
+      console.log('[checkBlockberryTransaction] Empty response - transaction pending');
+      return { included: false, pending: true };
     }
 
     let data;
     try {
       data = JSON.parse(text);
+      console.log('[checkBlockberryTransaction] Parsed data:', JSON.stringify(data, null, 2));
     } catch (e) {
       console.warn('[checkBlockberryTransaction] Failed to parse JSON:', e);
+      console.warn('[checkBlockberryTransaction] Raw text:', text);
       return { included: false };
     }
     
     const tx: BlockberryZkAppTransaction = data;
 
     if (!tx || !tx.txHash) {
+      console.warn('[checkBlockberryTransaction] Invalid response structure:', data);
       return { included: false };
     }
 
+    console.log('[checkBlockberryTransaction] Transaction status:', tx.txStatus);
+
     // Check transaction status
     if (tx.txStatus === 'applied' || tx.txStatus === 'canonical') {
+       console.log('[checkBlockberryTransaction] ✅ Transaction included! Block:', tx.blockHeight);
        return { included: true, data: tx };
     }
 
@@ -66,11 +78,13 @@ export async function checkBlockberryTransaction(
       const failureMsg = tx.failureReason 
         ? tx.failureReason.map(f => f.failures.join(', ')).join('; ')
         : 'Transaction failed';
+      console.log('[checkBlockberryTransaction] ❌ Transaction failed:', failureMsg);
       return { included: false, failed: true, error: failureMsg };
     }
 
     // pending or other status
-    return { included: false };
+    console.log('[checkBlockberryTransaction] Transaction pending with status:', tx.txStatus);
+    return { included: false, pending: true };
 
   } catch (error) {
     console.warn('[checkBlockberryTransaction] Error:', error);

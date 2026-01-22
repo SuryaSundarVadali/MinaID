@@ -402,7 +402,13 @@ export function CredentialsCard({
       setIpfsCID(result.cid);
       setIsUploadingIPFS(false);
       
-      alert(`✅ Proof uploaded to IPFS!\n\nCID: ${result.cid}\n\nShare this CID with verifiers to access your proof.`);
+      // Display wallet address with CID for sharing
+      alert(
+        `✅ Proof uploaded to IPFS!\n\n` +
+        `CID: ${result.cid}\n\n` +
+        `🔑 Wallet Address: ${userDid}\n\n` +
+        `Share BOTH the CID and wallet address with verifiers to access your proof.`
+      );
     } catch (error: any) {
       console.error('[CredentialsCard] IPFS upload failed:', error);
       setIsUploadingIPFS(false);
@@ -561,13 +567,64 @@ export function CredentialsCard({
                 
                 {ipfsCID && (
                   <div className="bg-purple-50 border border-purple-200 rounded-lg p-3 mb-4 text-left">
-                    <p className="text-xs text-purple-700 font-semibold mb-1">☁️ Uploaded to IPFS</p>
-                    <p className="text-xs font-mono text-purple-900 break-all mb-1">
-                      {ipfsCID}
-                    </p>
-                    <p className="text-xs text-purple-600">
-                      Share this CID with verifiers
-                    </p>
+                    <p className="text-xs text-purple-700 font-semibold mb-2">☁️ Uploaded to IPFS</p>
+                    <div className="space-y-2">
+                      <div>
+                        <div className="flex items-center justify-between mb-1">
+                          <p className="text-xs text-purple-600">CID:</p>
+                          <button
+                            onClick={async () => {
+                              try {
+                                await navigator.clipboard.writeText(ipfsCID);
+                                const toast = (await import('react-hot-toast')).default;
+                                toast.success('CID copied!');
+                              } catch (error) {
+                                const toast = (await import('react-hot-toast')).default;
+                                toast.error('Failed to copy');
+                              }
+                            }}
+                            className="px-2 py-0.5 text-xs bg-purple-600 text-white rounded hover:bg-purple-700 transition-colors flex items-center gap-1"
+                          >
+                            <svg className="w-2.5 h-2.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
+                            </svg>
+                            Copy
+                          </button>
+                        </div>
+                        <p className="text-xs font-mono text-purple-900 break-all bg-white px-2 py-1.5 rounded">
+                          {ipfsCID}
+                        </p>
+                      </div>
+                      <div>
+                        <div className="flex items-center justify-between mb-1">
+                          <p className="text-xs text-purple-600">Wallet Address:</p>
+                          <button
+                            onClick={async () => {
+                              try {
+                                await navigator.clipboard.writeText(userDid!);
+                                const toast = (await import('react-hot-toast')).default;
+                                toast.success('Wallet address copied!');
+                              } catch (error) {
+                                const toast = (await import('react-hot-toast')).default;
+                                toast.error('Failed to copy');
+                              }
+                            }}
+                            className="px-2 py-0.5 text-xs bg-purple-600 text-white rounded hover:bg-purple-700 transition-colors flex items-center gap-1"
+                          >
+                            <svg className="w-2.5 h-2.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
+                            </svg>
+                            Copy
+                          </button>
+                        </div>
+                        <p className="text-xs font-mono text-purple-900 break-all bg-white px-2 py-1.5 rounded">
+                          {userDid}
+                        </p>
+                      </div>
+                      <p className="text-xs text-purple-600">
+                        ⚠️ Share BOTH with verifiers
+                      </p>
+                    </div>
                   </div>
                 )}
                 
@@ -795,7 +852,7 @@ export function CredentialsCard({
                   <p className="text-xs text-gray-500 uppercase tracking-wide mb-2">Transaction Hash</p>
                   <p className="font-mono text-xs break-all text-gray-900">{txHash}</p>
                   <a
-                    href={`https://minascan.io/devnet/tx/${txHash}`}
+                    href={`https://minascan.io/devnet/tx/${txHash}?type=zk-tx`}
                     target="_blank"
                     rel="noopener noreferrer"
                     className="text-indigo-600 hover:text-indigo-700 text-sm mt-2 inline-block"

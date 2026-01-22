@@ -45,6 +45,12 @@ export interface ZKProofData {
     clientVersion: string;
     generationTime: number;
     generatedAt: string;
+    // Validity and usage controls
+    validFrom: number;        // Unix timestamp when proof becomes valid
+    validUntil: number;       // Unix timestamp when proof expires (max 5 years)
+    maxUses?: number;         // Maximum number of times proof can be used (1 for one-time use, undefined for unlimited)
+    usageCount?: number;      // Current usage count
+    usedAt?: number[];        // Timestamps of when proof was used
   };
   selectiveDisclosure?: {
     salt: string;
@@ -105,7 +111,11 @@ export async function generateAgeProofZK(
   minimumAge: number,
   privateKey: PrivateKey,
   salt: string,
-  onProgress?: (message: string, percent: number) => void
+  onProgress?: (message: string, percent: number) => void,
+  options?: {
+    validityPeriodYears?: number; // Default: 1 year for age proofs
+    maxUses?: number; // undefined = unlimited, 1 = one-time use
+  }
 ): Promise<ZKProofData> {
   const startTime = performance.now();
   
@@ -181,6 +191,13 @@ export async function generateAgeProofZK(
     
     onProgress?.('Finalizing...', 95);
 
+    // Calculate validity period
+    const now = Date.now();
+    const validityYears = options?.validityPeriodYears || 1; // Age proofs default to 1 year
+    const maxValidityYears = 5; // Maximum 5 years
+    const actualValidityYears = Math.min(validityYears, maxValidityYears);
+    const validUntil = now + (actualValidityYears * 365 * 24 * 60 * 60 * 1000);
+
     const zkProofData: ZKProofData = {
       proof: proofJson,
       publicInput: {
@@ -200,6 +217,12 @@ export async function generateAgeProofZK(
         clientVersion: CLIENT_VERSION,
         generationTime,
         generatedAt: new Date().toISOString(),
+        // Validity controls
+        validFrom: now,
+        validUntil: validUntil,
+        maxUses: options?.maxUses, // undefined = unlimited, 1 = one-time use
+        usageCount: 0,
+        usedAt: [],
       },
     };
 
@@ -324,6 +347,11 @@ export async function generateCitizenshipProofZK(
   
   onProgress?.('Finalizing...', 95);
 
+  // Calculate validity period
+  const now = Date.now();
+  const validityYears = 5; // Citizenship proofs valid for 5 years
+  const validUntil = now + (validityYears * 365 * 24 * 60 * 60 * 1000);
+
   const zkProofData: ZKProofData = {
     proof: proofJson,
     publicInput: {
@@ -342,6 +370,10 @@ export async function generateCitizenshipProofZK(
       clientVersion: CLIENT_VERSION,
       generationTime,
       generatedAt: new Date().toISOString(),
+      validFrom: now,
+      validUntil: validUntil,
+      usageCount: 0,
+      usedAt: [],
     },
     selectiveDisclosure: {
       salt,
@@ -427,6 +459,11 @@ export async function generateNameProofZK(
   const publicOutput = result.proof.publicOutput;
   const proofJson = proof.toJSON();
 
+  // Calculate validity period
+  const now = Date.now();
+  const validityYears = 5; // Name proofs valid for 5 years
+  const validUntil = now + (validityYears * 365 * 24 * 60 * 60 * 1000);
+
   const zkProofData: ZKProofData = {
     proof: proofJson,
     publicInput: {
@@ -445,6 +482,10 @@ export async function generateNameProofZK(
       clientVersion: CLIENT_VERSION,
       generationTime,
       generatedAt: new Date().toISOString(),
+      validFrom: now,
+      validUntil: validUntil,
+      usageCount: 0,
+      usedAt: [],
     },
     selectiveDisclosure: {
       salt,
@@ -531,6 +572,11 @@ export async function generateKYCProofZK(
 
   const generationTime = Math.round(performance.now() - startTime);
 
+  // Calculate validity period
+  const now = Date.now();
+  const validityYears = 5; // KYC proofs valid for 5 years
+  const validUntil = now + (validityYears * 365 * 24 * 60 * 60 * 1000);
+
   const zkProofData: ZKProofData = {
     proof: { /* Simplified for KYC */ } as any,
     publicInput: {
@@ -549,6 +595,10 @@ export async function generateKYCProofZK(
       clientVersion: CLIENT_VERSION,
       generationTime,
       generatedAt: new Date().toISOString(),
+      validFrom: now,
+      validUntil: validUntil,
+      usageCount: 0,
+      usedAt: [],
     },
     selectiveDisclosure: { salt },
   };

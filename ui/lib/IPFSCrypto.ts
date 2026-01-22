@@ -79,6 +79,11 @@ export function decryptFromIPFS(params: DecryptionParams): any {
   try {
     const { ciphertext, iv, salt, passphrase } = params;
 
+    // Validate inputs
+    if (!ciphertext || !iv || !salt || !passphrase) {
+      throw new Error('Missing required decryption parameters');
+    }
+
     // Derive the same key using salt
     const key = deriveKey(passphrase, salt);
 
@@ -90,10 +95,16 @@ export function decryptFromIPFS(params: DecryptionParams): any {
     });
 
     // Convert to UTF-8 string
-    const plaintext = decrypted.toString(CryptoJS.enc.Utf8);
+    let plaintext: string;
+    try {
+      plaintext = decrypted.toString(CryptoJS.enc.Utf8);
+    } catch (utfError) {
+      // UTF-8 decoding failed - likely wrong passphrase
+      throw new Error('Wrong wallet address or passphrase - decryption failed');
+    }
 
-    if (!plaintext) {
-      throw new Error('Decryption failed: Invalid passphrase or corrupted data');
+    if (!plaintext || plaintext.length === 0) {
+      throw new Error('Wrong wallet address or passphrase - unable to decrypt data');
     }
 
     // Try to parse as JSON, return string if parsing fails
@@ -104,7 +115,14 @@ export function decryptFromIPFS(params: DecryptionParams): any {
     }
   } catch (error) {
     console.error('[IPFSCrypto] Decryption failed:', error);
-    throw new Error('Failed to decrypt data from IPFS: ' + (error as Error).message);
+    
+    // Provide user-friendly error messages
+    const errorMsg = (error as Error).message;
+    if (errorMsg.includes('Malformed UTF-8') || errorMsg.includes('Wrong wallet address')) {
+      throw new Error('Wrong wallet address or passphrase. Please verify you entered the correct wallet address that was used to encrypt this data.');
+    }
+    
+    throw new Error('Failed to decrypt data from IPFS: ' + errorMsg);
   }
 }
 
